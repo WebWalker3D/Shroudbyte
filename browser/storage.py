@@ -1,0 +1,196 @@
+"""Persistent storage for bookmarks, history, settings, and blocked hosts."""
+
+import json
+import os
+import time
+from pathlib import Path
+
+
+DATA_DIR = Path(os.environ.get("BLADE_DATA_DIR", Path.home() / ".blade-browser"))
+
+
+def _ensure_dir():
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Generic JSON helpers
+# ---------------------------------------------------------------------------
+
+def _load_json(filename, default=None):
+    _ensure_dir()
+    path = DATA_DIR / filename
+    if path.exists():
+        with open(path, "r") as f:
+            return json.load(f)
+    return default if default is not None else []
+
+
+def _save_json(filename, data):
+    _ensure_dir()
+    path = DATA_DIR / filename
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Bookmarks
+# ---------------------------------------------------------------------------
+
+def load_bookmarks():
+    return _load_json("bookmarks.json", [])
+
+
+def save_bookmarks(bookmarks):
+    _save_json("bookmarks.json", bookmarks)
+
+
+def add_bookmark(title, url):
+    bm = load_bookmarks()
+    if any(b["url"] == url for b in bm):
+        return False
+    bm.append({"title": title, "url": url, "added": time.time()})
+    save_bookmarks(bm)
+    return True
+
+
+def remove_bookmark(url):
+    bm = load_bookmarks()
+    bm = [b for b in bm if b["url"] != url]
+    save_bookmarks(bm)
+
+
+def is_bookmarked(url):
+    return any(b["url"] == url for b in load_bookmarks())
+
+
+# ---------------------------------------------------------------------------
+# History
+# ---------------------------------------------------------------------------
+
+def load_history():
+    return _load_json("history.json", [])
+
+
+def save_history(history):
+    _save_json("history.json", history)
+
+
+def add_history_entry(title, url):
+    hist = load_history()
+    hist.insert(0, {"title": title, "url": url, "visited": time.time()})
+    # Keep the last 5000 entries
+    if len(hist) > 5000:
+        hist = hist[:5000]
+    save_history(hist)
+
+
+def clear_history():
+    save_history([])
+
+
+# ---------------------------------------------------------------------------
+# Settings
+# ---------------------------------------------------------------------------
+
+DEFAULT_SETTINGS = {
+    "homepage": "https://duckduckgo.com",
+    "search_engine": "https://duckduckgo.com/?q={}",
+    "enable_javascript": True,
+    "enable_adblock": True,
+    "private_mode": False,
+    "default_zoom": 100,
+    "user_agent": "",
+    "https_only": False,
+    "do_not_track": True,
+    "restore_session": True,
+    "strip_tracking": True,
+    "fingerprint_resistance": False,
+    "dns_over_https": "automatic",
+    "dns_over_https_provider": "https://dns.cloudflare.com/dns-query",
+}
+
+
+def load_settings():
+    settings = _load_json("settings.json", {})
+    merged = {**DEFAULT_SETTINGS, **settings}
+    return merged
+
+
+def save_settings(settings):
+    _save_json("settings.json", settings)
+
+
+# ---------------------------------------------------------------------------
+# Ad-block host list
+# ---------------------------------------------------------------------------
+
+def load_blocked_hosts():
+    path = DATA_DIR / "blocked_hosts.txt"
+    if path.exists():
+        with open(path, "r") as f:
+            return set(line.strip() for line in f if line.strip() and not line.startswith("#"))
+    return set()
+
+
+def save_blocked_hosts(hosts):
+    _ensure_dir()
+    path = DATA_DIR / "blocked_hosts.txt"
+    with open(path, "w") as f:
+        f.write("# Blade Browser blocked hosts list\n")
+        for h in sorted(hosts):
+            f.write(h + "\n")
+
+
+# ---------------------------------------------------------------------------
+# Session restore
+# ---------------------------------------------------------------------------
+
+def save_session(tabs):
+    """Save list of tab dicts [{url, title}, ...] for session restore."""
+    _save_json("session.json", tabs)
+
+
+def load_session():
+    """Load saved session tabs. Returns list of {url, title} dicts."""
+    return _load_json("session.json", [])
+
+
+def clear_session():
+    path = DATA_DIR / "session.json"
+    if path.exists():
+        path.unlink()
+
+
+# ---------------------------------------------------------------------------
+# URL autocomplete suggestions
+# ---------------------------------------------------------------------------
+
+def get_url_suggestions(limit=500):
+    """Return deduplicated URL suggestions sorted by visit frequency.
+
+    Merges history and bookmarks.  Returns a list of
+    ``(url, title, frequency)`` tuples, most-visited first, capped at *limit*.
+    """
+    freq = {}   # url -> visit count
+    titles = {} # url -> most recent title
+
+    for entry in load_history():
+        url = entry.get("url", "")
+        if not url or url.startswith("blade:"):
+            continue
+        freq[url] = freq.get(url, 0) + 1
+        if url not in titles:
+            titles[url] = entry.get("title", "")
+
+    for bm in load_bookmarks():
+        url = bm.get("url", "")
+        if not url:
+            continue
+        freq.setdefault(url, 0)
+        if url not in titles or not titles[url]:
+            titles[url] = bm.get("title", "")
+
+    suggestions = [(url, titles.get(url, ""), count) for url, count in freq.items()]
+    suggestions.sort(key=lambda t: t[2], reverse=True)
+    return suggestions[:limit]

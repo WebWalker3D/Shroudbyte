@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Blade Browser
+Comment=A custom Linux web browser
+Exec=/home/blaine/browser/blade-browser.sh
+Type=Application
+Categories=Network;WebBrowser;
+Terminal=false
+StartupNotify=true
