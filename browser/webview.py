@@ -81,7 +81,7 @@ class BladeWebView(QWebEngineView):
         """Build custom right-click context menu based on what was clicked."""
         from . import style
 
-        data = self.page().contextMenuData()
+        data = self.lastContextMenuRequest()
         menu = QMenu(self)
         menu.setStyleSheet(f"""
             QMenu {{
