@@ -1,22 +1,22 @@
-"""Centralized stylesheet for Blade Browser — modern dark theme."""
+"""Centralized stylesheet for Blade Browser — Forged Dark theme."""
 
-# Colour palette
-BG_DARK = "#111115"        # deepest background
-BG_MID = "#18181c"         # panels / toolbar
-BG_CARD = "#1f1f25"        # cards, inputs, tab bar
-BG_HOVER = "#2a2a32"       # hover states
-BG_ACTIVE = "#33333d"      # pressed / active states
-BORDER = "#2c2c34"         # subtle borders
-BORDER_FOCUS = "#6366f1"   # indigo accent for focus rings
-ACCENT = "#6366f1"         # primary accent (indigo)
-ACCENT_HOVER = "#818cf8"   # lighter accent on hover
-ACCENT_TEXT = "#c7d2fe"    # light accent for text highlights
-TEXT = "#e4e4e9"           # primary text
-TEXT_DIM = "#9494a3"       # secondary / muted text
-TEXT_FAINT = "#5c5c6b"     # placeholder text
-GREEN = "#34d399"          # success / complete
-RED = "#f87171"            # error / cancel
-YELLOW = "#fbbf24"         # warning
+# ── Colour palette — warm, premium dark ──────────────────────────
+BG_DARK = "#0c0b10"        # deepest background — warm near-black
+BG_MID = "#14131a"          # panels / toolbar / tab bar
+BG_CARD = "#1c1b24"         # cards, inputs, surfaces
+BG_HOVER = "#262430"        # hover states
+BG_ACTIVE = "#302e3b"       # pressed / active states
+BORDER = "#282633"          # subtle warm borders
+BORDER_FOCUS = "#cd8d6a"    # copper accent for focus rings
+ACCENT = "#cd8d6a"          # primary accent — warm copper
+ACCENT_HOVER = "#dba888"    # lighter copper on hover
+ACCENT_TEXT = "#e8c8b0"     # light copper for text highlights
+TEXT = "#ede8e3"            # primary text — warm off-white
+TEXT_DIM = "#8a8494"        # secondary / muted text
+TEXT_FAINT = "#5a5568"      # placeholder text
+GREEN = "#7db88f"           # success — sage green
+RED = "#d96b6b"             # error — muted warm red
+YELLOW = "#d4a857"          # warning — warm gold
 
 
 GLOBAL_STYLESHEET = f"""
@@ -30,12 +30,12 @@ QMenuBar {{
     background: {BG_MID};
     color: {TEXT_DIM};
     border-bottom: 1px solid {BORDER};
-    padding: 2px 4px;
+    padding: 2px 6px;
     font-size: 13px;
 }}
 QMenuBar::item {{
-    padding: 5px 10px;
-    border-radius: 4px;
+    padding: 6px 12px;
+    border-radius: 6px;
 }}
 QMenuBar::item:selected {{
     background: {BG_HOVER};
@@ -45,30 +45,30 @@ QMenu {{
     background: {BG_CARD};
     color: {TEXT};
     border: 1px solid {BORDER};
-    border-radius: 8px;
-    padding: 4px 0px;
+    border-radius: 10px;
+    padding: 6px 0px;
 }}
 QMenu::item {{
-    padding: 6px 28px 6px 16px;
-    border-radius: 4px;
-    margin: 2px 4px;
+    padding: 8px 32px 8px 18px;
+    border-radius: 6px;
+    margin: 2px 6px;
 }}
 QMenu::item:selected {{
     background: {ACCENT};
-    color: white;
+    color: {BG_DARK};
 }}
 QMenu::separator {{
     height: 1px;
     background: {BORDER};
-    margin: 4px 12px;
+    margin: 6px 14px;
 }}
 
 /* ── Toolbar / nav bar ───────────────────────────── */
 QToolBar {{
     background: {BG_MID};
-    border-bottom: 1px solid {BORDER};
-    spacing: 6px;
-    padding: 6px 10px;
+    border: none;
+    spacing: 4px;
+    padding: 8px 12px;
 }}
 
 /* ── Tab bar ─────────────────────────────────────── */
@@ -81,24 +81,24 @@ QTabBar {{
     qproperty-drawBase: 0;
 }}
 QTabBar::tab {{
-    padding: 8px 18px;
-    margin: 4px 1px 0px 1px;
+    padding: 10px 22px;
+    margin: 0;
     background: transparent;
-    color: {TEXT_DIM};
+    color: {TEXT_FAINT};
     border: none;
-    border-top-left-radius: 8px;
-    border-top-right-radius: 8px;
+    border-bottom: 2px solid transparent;
     min-width: 80px;
     max-width: 220px;
     font-size: 13px;
 }}
 QTabBar::tab:selected {{
-    background: {BG_DARK};
     color: {TEXT};
+    border-bottom-color: {ACCENT};
+    background: transparent;
 }}
 QTabBar::tab:hover:!selected {{
-    background: {BG_HOVER};
-    color: {TEXT};
+    color: {TEXT_DIM};
+    background: #1a1923;
 }}
 QTabBar::close-button {{
     image: none;
@@ -113,38 +113,38 @@ QTabBar::close-button:hover {{
 /* ── Status bar ──────────────────────────────────── */
 QStatusBar {{
     background: {BG_MID};
-    color: {TEXT_DIM};
-    font-size: 12px;
+    color: {TEXT_FAINT};
+    font-size: 11px;
     border-top: 1px solid {BORDER};
-    padding: 2px 8px;
+    padding: 3px 10px;
 }}
 
 /* ── Progress bar (loading indicator) ────────────── */
 QProgressBar {{
-    background: {BG_CARD};
+    background: {BG_DARK};
     border: none;
-    border-radius: 4px;
+    border-radius: 0px;
     text-align: center;
     color: transparent;
-    height: 4px;
+    max-height: 3px;
 }}
 QProgressBar::chunk {{
     background: qlineargradient(
         x1:0, y1:0, x2:1, y2:0,
         stop:0 {ACCENT}, stop:1 {ACCENT_HOVER}
     );
-    border-radius: 4px;
+    border-radius: 0px;
 }}
 
 /* ── Scroll bars ─────────────────────────────────── */
 QScrollBar:vertical {{
     background: transparent;
-    width: 8px;
+    width: 6px;
     margin: 0;
 }}
 QScrollBar::handle:vertical {{
     background: {BG_ACTIVE};
-    border-radius: 4px;
+    border-radius: 3px;
     min-height: 30px;
 }}
 QScrollBar::handle:vertical:hover {{
@@ -155,12 +155,12 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
 }}
 QScrollBar:horizontal {{
     background: transparent;
-    height: 8px;
+    height: 6px;
     margin: 0;
 }}
 QScrollBar::handle:horizontal {{
     background: {BG_ACTIVE};
-    border-radius: 4px;
+    border-radius: 3px;
     min-width: 30px;
 }}
 QScrollBar::handle:horizontal:hover {{
@@ -175,8 +175,8 @@ QToolTip {{
     background: {BG_CARD};
     color: {TEXT};
     border: 1px solid {BORDER};
-    border-radius: 6px;
-    padding: 5px 8px;
+    border-radius: 8px;
+    padding: 6px 10px;
     font-size: 12px;
 }}
 
@@ -195,16 +195,16 @@ QLabel {{
 
 NAV_BTN_STYLE = f"""
     QPushButton {{
-        font-size: 15px;
+        font-size: 14px;
         font-weight: 500;
-        min-width: 36px;
-        max-width: 36px;
-        min-height: 36px;
-        max-height: 36px;
+        min-width: 34px;
+        max-width: 34px;
+        min-height: 34px;
+        max-height: 34px;
         border: none;
         border-radius: 8px;
         background: transparent;
-        color: {TEXT_DIM};
+        color: {TEXT_FAINT};
     }}
     QPushButton:hover {{
         background: {BG_HOVER};
@@ -217,15 +217,15 @@ NAV_BTN_STYLE = f"""
 
 URL_BAR_STYLE = f"""
     QLineEdit {{
-        padding: 8px 16px;
+        padding: 9px 18px;
         font-size: 14px;
-        font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
-        border: 2px solid {BORDER};
-        border-radius: 20px;
+        font-family: 'Cantarell', 'Noto Sans', system-ui, sans-serif;
+        border: 1px solid {BORDER};
+        border-radius: 10px;
         background: {BG_CARD};
         color: {TEXT};
         selection-background-color: {ACCENT};
-        selection-color: white;
+        selection-color: {BG_DARK};
     }}
     QLineEdit:focus {{
         border-color: {ACCENT};
@@ -235,15 +235,15 @@ URL_BAR_STYLE = f"""
 
 BOOKMARK_BTN_STYLE = f"""
     QPushButton {{
-        font-size: 18px;
-        min-width: 36px;
-        max-width: 36px;
-        min-height: 36px;
-        max-height: 36px;
+        font-size: 17px;
+        min-width: 34px;
+        max-width: 34px;
+        min-height: 34px;
+        max-height: 34px;
         border: none;
         border-radius: 8px;
         background: transparent;
-        color: {TEXT_DIM};
+        color: {TEXT_FAINT};
     }}
     QPushButton:hover {{
         background: {BG_HOVER};
@@ -256,20 +256,20 @@ BOOKMARK_BTN_STYLE = f"""
 
 NEW_TAB_BTN_STYLE = f"""
     QPushButton {{
-        font-size: 18px;
+        font-size: 17px;
         font-weight: bold;
-        min-width: 36px;
-        max-width: 36px;
-        min-height: 36px;
-        max-height: 36px;
+        min-width: 34px;
+        max-width: 34px;
+        min-height: 34px;
+        max-height: 34px;
         border: none;
         border-radius: 8px;
         background: transparent;
-        color: {TEXT_DIM};
+        color: {TEXT_FAINT};
     }}
     QPushButton:hover {{
         background: {ACCENT};
-        color: white;
+        color: {BG_DARK};
     }}
     QPushButton:pressed {{
         background: {ACCENT_HOVER};
@@ -278,7 +278,7 @@ NEW_TAB_BTN_STYLE = f"""
 
 DIALOG_BTN_STYLE = f"""
     QPushButton {{
-        padding: 8px 20px;
+        padding: 9px 22px;
         font-size: 13px;
         font-weight: 500;
         border: 1px solid {BORDER};
@@ -297,25 +297,25 @@ DIALOG_BTN_STYLE = f"""
 
 DIALOG_BTN_PRIMARY_STYLE = f"""
     QPushButton {{
-        padding: 8px 20px;
+        padding: 9px 22px;
         font-size: 13px;
         font-weight: 600;
         border: none;
         border-radius: 8px;
         background: {ACCENT};
-        color: white;
+        color: {BG_DARK};
     }}
     QPushButton:hover {{
         background: {ACCENT_HOVER};
     }}
     QPushButton:pressed {{
-        background: #4f46e5;
+        background: #b87a5a;
     }}
 """
 
 DIALOG_BTN_DANGER_STYLE = f"""
     QPushButton {{
-        padding: 8px 20px;
+        padding: 9px 22px;
         font-size: 13px;
         font-weight: 500;
         border: 1px solid {RED};
@@ -325,7 +325,7 @@ DIALOG_BTN_DANGER_STYLE = f"""
     }}
     QPushButton:hover {{
         background: {RED};
-        color: white;
+        color: {BG_DARK};
     }}
 """
 
@@ -335,18 +335,18 @@ LIST_WIDGET_STYLE = f"""
         color: {TEXT};
         font-size: 13px;
         border: 1px solid {BORDER};
-        border-radius: 8px;
+        border-radius: 10px;
         padding: 4px;
         outline: none;
     }}
     QListWidget::item {{
-        padding: 10px 12px;
+        padding: 10px 14px;
         border-radius: 6px;
         margin: 2px;
     }}
     QListWidget::item:selected {{
         background: {ACCENT};
-        color: white;
+        color: {BG_DARK};
     }}
     QListWidget::item:hover:!selected {{
         background: {BG_HOVER};
@@ -355,11 +355,11 @@ LIST_WIDGET_STYLE = f"""
 
 SEARCH_INPUT_STYLE = f"""
     QLineEdit {{
-        padding: 10px 14px;
+        padding: 10px 16px;
         font-size: 14px;
         background: {BG_DARK};
         color: {TEXT};
-        border: 2px solid {BORDER};
+        border: 1px solid {BORDER};
         border-radius: 10px;
     }}
     QLineEdit:focus {{
@@ -371,19 +371,19 @@ SETTINGS_FORM_STYLE = f"""
     QDialog {{ background: {BG_MID}; color: {TEXT}; }}
     QLabel {{ color: {TEXT_DIM}; font-size: 13px; }}
     QLineEdit {{
-        padding: 8px 12px;
+        padding: 9px 14px;
         background: {BG_DARK};
         color: {TEXT};
-        border: 2px solid {BORDER};
+        border: 1px solid {BORDER};
         border-radius: 8px;
         font-size: 13px;
     }}
     QLineEdit:focus {{ border-color: {ACCENT}; }}
     QSpinBox {{
-        padding: 8px 12px;
+        padding: 9px 14px;
         background: {BG_DARK};
         color: {TEXT};
-        border: 2px solid {BORDER};
+        border: 1px solid {BORDER};
         border-radius: 8px;
         font-size: 13px;
     }}
@@ -391,8 +391,8 @@ SETTINGS_FORM_STYLE = f"""
     QCheckBox {{ color: {TEXT}; spacing: 8px; }}
     QCheckBox::indicator {{
         width: 20px; height: 20px;
-        border-radius: 4px;
-        border: 2px solid {BORDER};
+        border-radius: 5px;
+        border: 1px solid {BORDER};
         background: {BG_DARK};
     }}
     QCheckBox::indicator:checked {{
@@ -402,28 +402,28 @@ SETTINGS_FORM_STYLE = f"""
     QDialogButtonBox {{ button-layout: 0; }}
 """
 
-ADBLOCK_LABEL_ON_STYLE = f"color: {GREEN}; font-size: 12px; padding: 0 8px;"
-ADBLOCK_LABEL_OFF_STYLE = f"color: {TEXT_FAINT}; font-size: 12px; padding: 0 8px;"
+ADBLOCK_LABEL_ON_STYLE = f"color: {GREEN}; font-size: 11px; padding: 0 8px;"
+ADBLOCK_LABEL_OFF_STYLE = f"color: {TEXT_FAINT}; font-size: 11px; padding: 0 8px;"
 
 COMPLETER_POPUP_STYLE = f"""
     QListView {{
         background: {BG_CARD};
         color: {TEXT};
         border: 1px solid {BORDER};
-        border-radius: 8px;
+        border-radius: 10px;
         padding: 4px;
         outline: none;
         font-size: 13px;
-        font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+        font-family: 'Cantarell', 'Noto Sans', system-ui, sans-serif;
     }}
     QListView::item {{
-        padding: 6px 10px;
+        padding: 7px 12px;
         border-radius: 6px;
         margin: 1px 2px;
     }}
     QListView::item:selected {{
         background: {ACCENT};
-        color: white;
+        color: {BG_DARK};
     }}
     QListView::item:hover:!selected {{
         background: {BG_HOVER};
@@ -434,10 +434,10 @@ PASSWORD_DIALOG_STYLE = f"""
     QDialog {{ background: {BG_MID}; color: {TEXT}; }}
     QLabel {{ color: {TEXT_DIM}; font-size: 13px; }}
     QLineEdit {{
-        padding: 8px 12px;
+        padding: 9px 14px;
         background: {BG_DARK};
         color: {TEXT};
-        border: 2px solid {BORDER};
+        border: 1px solid {BORDER};
         border-radius: 8px;
         font-size: 13px;
     }}
@@ -448,7 +448,7 @@ PASSWORD_SAVE_BAR_STYLE = f"""
     QFrame {{
         background: {BG_CARD};
         border-bottom: 1px solid {BORDER};
-        padding: 6px 12px;
+        padding: 6px 14px;
     }}
     QLabel {{
         color: {TEXT};
@@ -462,20 +462,20 @@ FILTER_LIST_STYLE = f"""
     QGroupBox {{
         background: {BG_CARD};
         border: 1px solid {BORDER};
-        border-radius: 8px;
-        padding: 12px;
+        border-radius: 10px;
+        padding: 14px;
         margin-top: 8px;
     }}
     QGroupBox::title {{
         color: {ACCENT_TEXT};
         subcontrol-origin: margin;
-        padding: 0 6px;
+        padding: 0 8px;
     }}
     QCheckBox {{ color: {TEXT}; spacing: 8px; font-size: 13px; }}
     QCheckBox::indicator {{
         width: 18px; height: 18px;
-        border-radius: 4px;
-        border: 2px solid {BORDER};
+        border-radius: 5px;
+        border: 1px solid {BORDER};
         background: {BG_DARK};
     }}
     QCheckBox::indicator:checked {{
@@ -488,15 +488,15 @@ FIND_BAR_STYLE = f"""
     QFrame {{
         background: {BG_MID};
         border-top: 1px solid {BORDER};
-        padding: 4px 8px;
+        padding: 5px 10px;
     }}
     QLineEdit {{
-        padding: 6px 10px;
+        padding: 7px 12px;
         font-size: 13px;
         background: {BG_DARK};
         color: {TEXT};
-        border: 2px solid {BORDER};
-        border-radius: 6px;
+        border: 1px solid {BORDER};
+        border-radius: 8px;
         min-width: 220px;
     }}
     QLineEdit:focus {{
@@ -514,8 +514,8 @@ FIND_BAR_STYLE = f"""
     }}
     QCheckBox::indicator {{
         width: 16px; height: 16px;
-        border-radius: 3px;
-        border: 2px solid {BORDER};
+        border-radius: 4px;
+        border: 1px solid {BORDER};
         background: {BG_DARK};
     }}
     QCheckBox::indicator:checked {{
@@ -526,10 +526,10 @@ FIND_BAR_STYLE = f"""
 
 FIND_BAR_BTN_STYLE = f"""
     QPushButton {{
-        padding: 4px 10px;
+        padding: 5px 12px;
         font-size: 12px;
         border: 1px solid {BORDER};
-        border-radius: 4px;
+        border-radius: 6px;
         background: {BG_CARD};
         color: {TEXT};
         min-width: 28px;
@@ -547,6 +547,6 @@ SOURCE_EDITOR_STYLE = f"""
         font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
         font-size: 13px;
         border: none;
-        padding: 12px;
+        padding: 14px;
     }}
 """

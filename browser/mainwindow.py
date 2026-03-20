@@ -298,7 +298,7 @@ class MainWindow(QMainWindow):
 
         # URL bar
         self._url_bar = QLineEdit()
-        self._url_bar.setPlaceholderText("  Search or enter URL...")
+        self._url_bar.setPlaceholderText("Search or enter URL\u2026")
         self._url_bar.setStyleSheet(style.URL_BAR_STYLE)
         self._url_bar.returnPressed.connect(self._navigate_to_url)
 
@@ -358,11 +358,19 @@ class MainWindow(QMainWindow):
             self._tab_context_menu
         )
 
-        # Central container (tabs + find bar)
+        # Central container (progress bar + tabs + find bar)
         central = QWidget()
         self._central_layout = QVBoxLayout(central)
         self._central_layout.setContentsMargins(0, 0, 0, 0)
         self._central_layout.setSpacing(0)
+
+        # Full-width loading bar pinned under the toolbar
+        self._progress = QProgressBar()
+        self._progress.setFixedHeight(3)
+        self._progress.setTextVisible(False)
+        self._progress.setVisible(False)
+        self._central_layout.addWidget(self._progress)
+
         self._central_layout.addWidget(self._tabs)
 
         # Find bar (hidden by default)
@@ -375,13 +383,6 @@ class MainWindow(QMainWindow):
         # --- Status bar ---
         self._status = QStatusBar()
         self.setStatusBar(self._status)
-
-        self._progress = QProgressBar()
-        self._progress.setMaximumWidth(180)
-        self._progress.setFixedHeight(4)
-        self._progress.setTextVisible(False)
-        self._progress.setVisible(False)
-        self._status.addPermanentWidget(self._progress)
 
         self._adblock_label = QLabel()
         self._status.addPermanentWidget(self._adblock_label)
