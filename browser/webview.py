@@ -30,10 +30,27 @@ class BladePage(QWebEnginePage):
     def certificateError(self, error):
         return True
 
+    # Loopback IPs that Chromium blocks when a SOCKS proxy is active.
+    # Rewrite them to "localhost" which Chromium allows through.
+    _LOOPBACK_IPS = {"127.0.0.1", "::1", "[::1]"}
+
     def acceptNavigationRequest(self, url, nav_type, is_main_frame):
-        """Upgrade http:// to https:// when HTTPS-only mode is enabled."""
+        """Rewrite loopback IPs to localhost and upgrade http to https."""
+        host = url.host()
+
+        # Chromium blocks raw loopback IPs through a proxy — rewrite to
+        # "localhost" which is excluded from proxy and resolves the same.
+        # Guard against re-entry: only rewrite if host is still an IP.
+        if is_main_frame and host in self._LOOPBACK_IPS:
+            rewritten = QUrl(url)
+            rewritten.setHost("localhost")
+            # Use QTimer.singleShot to break out of the navigation call stack
+            # and avoid re-entrant setUrl inside acceptNavigationRequest.
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, lambda u=rewritten: self.setUrl(u))
+            return False
+
         if self.https_only and url.scheme() == "http" and is_main_frame:
-            host = url.host()
             # Don't upgrade localhost / local network
             if host not in ("localhost", "127.0.0.1", "::1") and not host.endswith(".local"):
                 secure = QUrl(url)

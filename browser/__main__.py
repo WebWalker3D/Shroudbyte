@@ -6,6 +6,11 @@ import signal
 import subprocess
 import sys
 
+# Install global crash handler as early as possible so that any unhandled
+# exception during startup is caught and logged instead of dying silently.
+from . import crashhandler as _crashhandler
+_crashhandler.install()
+
 # QtWebEngine (Chromium) refuses to run as root without disabling its sandbox.
 # This is safe for a personal desktop browser.
 if os.getuid() == 0:
@@ -18,6 +23,8 @@ _gpu_flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
 _gpu_flags += " --enable-gpu-rasterization"
 _gpu_flags += " --enable-zero-copy"
 _gpu_flags += " --enable-features=CanvasOopRasterization"
+_gpu_flags += " --allow-insecure-localhost"
+_gpu_flags += " --disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessRespectPreflightResults"
 os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _gpu_flags.strip()
 
 # DNS configuration — must be set before QApplication is created
@@ -39,7 +46,7 @@ if _settings.get("custom_dns_enabled") and _settings.get("custom_dns_server") an
 
     _chromium_flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
     _chromium_flags += f" --proxy-server=socks5://127.0.0.1:{_proxy_port}"
-    _chromium_flags += ' --host-resolver-rules="MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"'
+    _chromium_flags += ' --host-resolver-rules="MAP * ~NOTFOUND , EXCLUDE localhost , EXCLUDE 127.0.0.1 , EXCLUDE [::1]"'
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _chromium_flags.strip()
 else:
     # Standard Chromium DNS-over-HTTPS
@@ -140,44 +147,62 @@ def main():
         print("Blade Browser is already running.", file=sys.stderr)
         sys.exit(0)
 
-    # Launch splash in a separate process — it appears instantly while we
-    # do the heavy Qt WebEngine initialisation in this process.
-    splash_proc = _launch_splash()
+    splash_proc = None
+    try:
+        # Launch splash in a separate process — it appears instantly while we
+        # do the heavy Qt WebEngine initialisation in this process.
+        splash_proc = _launch_splash()
 
-    app = QApplication(sys.argv)
-    app.setApplicationName(__app_name__)
-    app.setOrganizationName("BladeBrowser")
+        app = QApplication(sys.argv)
+        app.setApplicationName(__app_name__)
+        app.setOrganizationName("BladeBrowser")
 
-    # Dark palette for dialogs and system widgets
-    from PyQt6.QtGui import QPalette
+        # Dark palette for dialogs and system widgets
+        from PyQt6.QtGui import QPalette
 
-    palette = QPalette()
-    palette.setColor(QPalette.ColorRole.Window, QColor(30, 30, 30))
-    palette.setColor(QPalette.ColorRole.WindowText, QColor(238, 238, 238))
-    palette.setColor(QPalette.ColorRole.Base, QColor(30, 30, 30))
-    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(43, 43, 43))
-    palette.setColor(QPalette.ColorRole.Text, QColor(238, 238, 238))
-    palette.setColor(QPalette.ColorRole.Button, QColor(43, 43, 43))
-    palette.setColor(QPalette.ColorRole.ButtonText, QColor(238, 238, 238))
-    palette.setColor(QPalette.ColorRole.Highlight, QColor(41, 121, 255))
-    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
-    palette.setColor(QPalette.ColorRole.Link, QColor(41, 121, 255))
-    app.setPalette(palette)
+        palette = QPalette()
+        palette.setColor(QPalette.ColorRole.Window, QColor(30, 30, 30))
+        palette.setColor(QPalette.ColorRole.WindowText, QColor(238, 238, 238))
+        palette.setColor(QPalette.ColorRole.Base, QColor(30, 30, 30))
+        palette.setColor(QPalette.ColorRole.AlternateBase, QColor(43, 43, 43))
+        palette.setColor(QPalette.ColorRole.Text, QColor(238, 238, 238))
+        palette.setColor(QPalette.ColorRole.Button, QColor(43, 43, 43))
+        palette.setColor(QPalette.ColorRole.ButtonText, QColor(238, 238, 238))
+        palette.setColor(QPalette.ColorRole.Highlight, QColor(41, 121, 255))
+        palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
+        palette.setColor(QPalette.ColorRole.Link, QColor(41, 121, 255))
+        app.setPalette(palette)
 
-    window = MainWindow(dns_proxy=_proxy_instance)
-    window.show()
+        window = MainWindow(dns_proxy=_proxy_instance)
+        window.show()
 
-    # Kill the splash now that the main window is visible.
-    splash_proc.terminate()
-    splash_proc.wait()
+        # Kill the splash now that the main window is visible.
+        splash_proc.terminate()
+        splash_proc.wait()
+        splash_proc = None
 
-    ret = app.exec()
+        ret = app.exec()
 
-    # Shut down the DNS proxy if it was running.
-    if _proxy_instance is not None:
-        _proxy_instance.stop()
+        # Shut down the DNS proxy if it was running.
+        if _proxy_instance is not None:
+            _proxy_instance.stop()
 
-    sys.exit(ret)
+        sys.exit(ret)
+
+    except SystemExit:
+        raise
+    except KeyboardInterrupt:
+        sys.exit(0)
+    except Exception:
+        # The global excepthook should handle this, but as a safety net
+        # re-invoke it explicitly in case something went wrong.
+        _crashhandler._excepthook(*sys.exc_info())
+        sys.exit(1)
+    finally:
+        # Make sure the splash doesn't linger if we crash during startup.
+        if splash_proc is not None:
+            splash_proc.terminate()
+            splash_proc.wait()
 
 
 if __name__ == "__main__":

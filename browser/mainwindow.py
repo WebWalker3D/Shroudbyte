@@ -655,9 +655,21 @@ class MainWindow(QMainWindow):
         if not text:
             return
 
-        if "." in text and " " not in text:
-            if not text.startswith(("http://", "https://", "file://")):
-                text = "https://" + text
+        # Treat as a URL if it already has a scheme, contains a dot, or
+        # looks like a localhost/IP address (with optional port).
+        has_scheme = text.startswith(("http://", "https://", "file://"))
+        looks_like_url = (
+            has_scheme
+            or ("." in text and " " not in text)
+            or text.startswith("localhost")
+            or text.startswith("127.0.0.1")
+            or text.startswith("[::1]")
+        )
+
+        if looks_like_url:
+            if not has_scheme:
+                scheme = "https://" if "." in text else "http://"
+                text = scheme + text
             url = QUrl(text)
         else:
             search = self._settings.get(
