@@ -1324,12 +1324,25 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _show_settings(self):
+        from PyQt6.QtWidgets import QScrollArea
+
         dialog = QDialog(self)
         dialog.setWindowTitle("Settings")
-        dialog.setMinimumWidth(480)
+        dialog.setMinimumWidth(520)
         dialog.setStyleSheet(style.SETTINGS_FORM_STYLE)
 
-        layout = QFormLayout(dialog)
+        # Outer layout holds the scroll area and bottom buttons
+        outer_layout = QVBoxLayout(dialog)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet(f"QScrollArea {{ background: {style.BG_MID}; border: none; }}")
+
+        form_widget = QWidget()
+        layout = QFormLayout(form_widget)
         layout.setSpacing(14)
         layout.setContentsMargins(24, 24, 24, 24)
 
@@ -1450,8 +1463,12 @@ class MainWindow(QMainWindow):
         custom_dns_check.toggled.connect(_toggle_dns_sections)
         _toggle_dns_sections()
 
+        scroll.setWidget(form_widget)
+        outer_layout.addWidget(scroll, 1)
+
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(8)
+        btn_layout.setContentsMargins(24, 12, 24, 16)
         save_btn = QPushButton("Save")
         save_btn.setStyleSheet(style.DIALOG_BTN_PRIMARY_STYLE)
         cancel_btn = QPushButton("Cancel")
@@ -1461,7 +1478,13 @@ class MainWindow(QMainWindow):
         btn_layout.addStretch()
         btn_layout.addWidget(cancel_btn)
         btn_layout.addWidget(save_btn)
-        layout.addRow(btn_layout)
+        outer_layout.addLayout(btn_layout)
+
+        # Size to content but cap at 80% of screen height so it scrolls on small screens
+        screen = self.screen()
+        if screen:
+            max_h = int(screen.availableGeometry().height() * 0.8)
+            dialog.resize(dialog.sizeHint().width(), min(dialog.sizeHint().height(), max_h))
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._settings["homepage"] = homepage_edit.text()
