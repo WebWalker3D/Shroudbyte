@@ -1,6 +1,9 @@
 """Entry point for Blade Browser."""
 
+import fcntl
 import os
+import signal
+import subprocess
 import sys
 
 # QtWebEngine (Chromium) refuses to run as root without disabling its sandbox.
@@ -34,18 +37,100 @@ if _doh_mode != "off":
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor
 
 from . import __app_name__
 from .mainwindow import MainWindow
 
+# Keep a module-level reference so the lock file stays open for the process lifetime.
+_lock_file = None
+
+
+def _acquire_single_instance_lock():
+    """Try to acquire an exclusive lock. Returns True if we are the only instance."""
+    global _lock_file
+    lock_path = _storage.DATA_DIR / "blade.lock"
+    _storage.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _lock_file = open(lock_path, "w")
+    try:
+        fcntl.flock(_lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_file.write(str(os.getpid()))
+        _lock_file.flush()
+        return True
+    except OSError:
+        _lock_file.close()
+        _lock_file = None
+        return False
+
+
+def _launch_splash():
+    """Launch a lightweight splash window in a separate process.
+
+    Returns the Popen handle so the caller can kill it once the main window
+    is ready.  The subprocess uses only basic Qt widgets (no WebEngine) so
+    it starts almost instantly.
+    """
+    script = r"""
+import sys
+from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
+
+app = QApplication(sys.argv)
+w = QWidget()
+w.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
+w.setFixedSize(380, 200)
+w.setStyleSheet("background-color: #18181c;")
+
+layout = QVBoxLayout(w)
+layout.setContentsMargins(0, 0, 0, 0)
+layout.setSpacing(8)
+
+title = QLabel("Blade Browser")
+title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+title.setFont(QFont("sans-serif", 22, QFont.Weight.Bold))
+title.setStyleSheet("color: #e4e4e9; background: transparent;")
+
+subtitle = QLabel("Loading\u2026")
+subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+subtitle.setFont(QFont("sans-serif", 10))
+subtitle.setStyleSheet("color: #9494a3; background: transparent;")
+
+layout.addStretch()
+layout.addWidget(title)
+layout.addWidget(subtitle)
+layout.addStretch()
+
+screen = app.primaryScreen()
+if screen:
+    geo = screen.availableGeometry()
+    w.move(geo.center().x() - 190, geo.center().y() - 100)
+
+w.show()
+sys.exit(app.exec())
+"""
+    return subprocess.Popen(
+        [sys.executable, "-c", script],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
 
 def main():
+    if not _acquire_single_instance_lock():
+        print("Blade Browser is already running.", file=sys.stderr)
+        sys.exit(0)
+
+    # Launch splash in a separate process — it appears instantly while we
+    # do the heavy Qt WebEngine initialisation in this process.
+    splash_proc = _launch_splash()
+
     app = QApplication(sys.argv)
     app.setApplicationName(__app_name__)
     app.setOrganizationName("BladeBrowser")
 
     # Dark palette for dialogs and system widgets
-    from PyQt6.QtGui import QPalette, QColor
+    from PyQt6.QtGui import QPalette
 
     palette = QPalette()
     palette.setColor(QPalette.ColorRole.Window, QColor(30, 30, 30))
@@ -62,6 +147,10 @@ def main():
 
     window = MainWindow()
     window.show()
+
+    # Kill the splash now that the main window is visible.
+    splash_proc.terminate()
+    splash_proc.wait()
 
     sys.exit(app.exec())
 
