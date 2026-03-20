@@ -20,20 +20,39 @@ _gpu_flags += " --enable-zero-copy"
 _gpu_flags += " --enable-features=CanvasOopRasterization"
 os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _gpu_flags.strip()
 
-# DNS-over-HTTPS — must be configured before QApplication is created
+# DNS configuration — must be set before QApplication is created
 # because Chromium parses these flags at startup.
 from . import storage as _storage
-_doh_settings = _storage.load_settings()
-_doh_mode = _doh_settings.get("dns_over_https", "automatic")
-_doh_provider = _doh_settings.get("dns_over_https_provider", "https://dns.cloudflare.com/dns-query")
+_settings = _storage.load_settings()
 
-if _doh_mode != "off":
+_proxy_instance = None
+
+if _settings.get("custom_dns_enabled") and _settings.get("custom_dns_server") and _settings.get("custom_dns_secret"):
+    # Custom authenticated DNS via local SOCKS5 proxy
+    from .dns_proxy import BladeSOCKS5Proxy
+    _proxy_instance = BladeSOCKS5Proxy(
+        pfsense_url=_settings["custom_dns_server"],
+        shared_secret=_settings["custom_dns_secret"],
+        fallback=_settings.get("custom_dns_fallback", True),
+    )
+    _proxy_port = _proxy_instance.start()
+
     _chromium_flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
-    _chromium_flags += " --enable-features=DnsOverHttps"
-    _chromium_flags += f" --dns-over-https-mode={_doh_mode}"
-    if _doh_mode == "secure" and _doh_provider:
-        _chromium_flags += f" --dns-over-https-templates={_doh_provider}"
+    _chromium_flags += f" --proxy-server=socks5://127.0.0.1:{_proxy_port}"
+    _chromium_flags += ' --host-resolver-rules="MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"'
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _chromium_flags.strip()
+else:
+    # Standard Chromium DNS-over-HTTPS
+    _doh_mode = _settings.get("dns_over_https", "automatic")
+    _doh_provider = _settings.get("dns_over_https_provider", "https://dns.cloudflare.com/dns-query")
+
+    if _doh_mode != "off":
+        _chromium_flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+        _chromium_flags += " --enable-features=DnsOverHttps"
+        _chromium_flags += f" --dns-over-https-mode={_doh_mode}"
+        if _doh_mode == "secure" and _doh_provider:
+            _chromium_flags += f" --dns-over-https-templates={_doh_provider}"
+        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _chromium_flags.strip()
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
@@ -145,14 +164,20 @@ def main():
     palette.setColor(QPalette.ColorRole.Link, QColor(41, 121, 255))
     app.setPalette(palette)
 
-    window = MainWindow()
+    window = MainWindow(dns_proxy=_proxy_instance)
     window.show()
 
     # Kill the splash now that the main window is visible.
     splash_proc.terminate()
     splash_proc.wait()
 
-    sys.exit(app.exec())
+    ret = app.exec()
+
+    # Shut down the DNS proxy if it was running.
+    if _proxy_instance is not None:
+        _proxy_instance.stop()
+
+    sys.exit(ret)
 
 
 if __name__ == "__main__":

@@ -132,8 +132,9 @@ class _SuggestionDelegate(QStyledItemDelegate):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, dns_proxy=None):
         super().__init__()
+        self._dns_proxy = dns_proxy
 
         self._settings = storage.load_settings()
         self._private_mode = self._settings.get("private_mode", False)
@@ -1380,11 +1381,62 @@ class MainWindow(QMainWindow):
         layout.addRow("Strip Tracking Params", strip_check)
         layout.addRow("Fingerprint Resistance", fp_check)
         layout.addRow("DNS-over-HTTPS", doh_combo)
-        layout.addRow("Restore Session", session_check)
+
+        doh_provider_edit = QLineEdit(self._settings.get(
+            "dns_over_https_provider", "https://dns.cloudflare.com/dns-query"))
+        doh_provider_edit.setPlaceholderText("https://dns.cloudflare.com/dns-query")
+        doh_provider_edit.setToolTip("DoH server URL (e.g. your pfSense Unbound endpoint)")
+        layout.addRow("DoH Provider URL", doh_provider_edit)
 
         doh_note = QLabel("DNS-over-HTTPS changes require a browser restart.")
         doh_note.setStyleSheet(f"color: {style.TEXT_FAINT}; font-size: 11px;")
         layout.addRow("", doh_note)
+
+        layout.addRow("Restore Session", session_check)
+
+        # --- Custom DNS (Blade DNS) section ---
+        dns_separator = QLabel("── Custom DNS ──")
+        dns_separator.setStyleSheet(f"color: {style.TEXT_DIM}; font-size: 12px;")
+        dns_separator.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addRow(dns_separator)
+
+        custom_dns_check = QCheckBox("Enabled (requires restart)")
+        custom_dns_check.setChecked(self._settings.get("custom_dns_enabled", False))
+
+        custom_dns_server = QLineEdit(self._settings.get("custom_dns_server", ""))
+        custom_dns_server.setPlaceholderText("https://pfsense.local:8853/blade-dns-query")
+        custom_dns_server.setToolTip("URL of your Blade DNS server on pfSense")
+
+        custom_dns_secret = QLineEdit(self._settings.get("custom_dns_secret", ""))
+        custom_dns_secret.setEchoMode(QLineEdit.EchoMode.Password)
+        custom_dns_secret.setPlaceholderText("Shared HMAC secret (hex)")
+
+        custom_dns_fallback = QCheckBox("Fall back to system DNS if server unreachable")
+        custom_dns_fallback.setChecked(self._settings.get("custom_dns_fallback", True))
+
+        layout.addRow("Custom DNS", custom_dns_check)
+        layout.addRow("DNS Server URL", custom_dns_server)
+        layout.addRow("Auth Secret", custom_dns_secret)
+        layout.addRow("", custom_dns_fallback)
+
+        custom_dns_note = QLabel(
+            "When enabled, overrides DNS-over-HTTPS above.\n"
+            "All DNS queries go through your authenticated server."
+        )
+        custom_dns_note.setStyleSheet(f"color: {style.TEXT_FAINT}; font-size: 11px;")
+        layout.addRow("", custom_dns_note)
+
+        # Grey out DoH fields when custom DNS is enabled and vice versa
+        def _toggle_dns_sections():
+            custom = custom_dns_check.isChecked()
+            doh_combo.setEnabled(not custom)
+            doh_provider_edit.setEnabled(not custom)
+            custom_dns_server.setEnabled(custom)
+            custom_dns_secret.setEnabled(custom)
+            custom_dns_fallback.setEnabled(custom)
+
+        custom_dns_check.toggled.connect(_toggle_dns_sections)
+        _toggle_dns_sections()
 
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(8)
@@ -1412,7 +1464,20 @@ class MainWindow(QMainWindow):
             self._settings["strip_tracking"] = strip_check.isChecked()
             self._settings["fingerprint_resistance"] = fp_check.isChecked()
             self._settings["dns_over_https"] = doh_combo.currentText()
+            self._settings["dns_over_https_provider"] = doh_provider_edit.text().strip()
+            self._settings["custom_dns_enabled"] = custom_dns_check.isChecked()
+            self._settings["custom_dns_server"] = custom_dns_server.text().strip()
+            self._settings["custom_dns_secret"] = custom_dns_secret.text().strip()
+            self._settings["custom_dns_fallback"] = custom_dns_fallback.isChecked()
             storage.save_settings(self._settings)
+
+            # Update proxy config at runtime if it's running
+            if self._dns_proxy is not None:
+                self._dns_proxy.update_config(
+                    pfsense_url=self._settings["custom_dns_server"],
+                    shared_secret=self._settings["custom_dns_secret"],
+                    fallback=self._settings["custom_dns_fallback"],
+                )
 
             self._apply_profile_settings()
             self._adblocker.enabled = self._settings["enable_adblock"]

@@ -108,6 +108,10 @@ DEFAULT_SETTINGS = {
     "fingerprint_resistance": False,
     "dns_over_https": "automatic",
     "dns_over_https_provider": "https://dns.cloudflare.com/dns-query",
+    "custom_dns_enabled": False,
+    "custom_dns_server": "",
+    "custom_dns_secret": "",
+    "custom_dns_fallback": True,
 }
 
 
