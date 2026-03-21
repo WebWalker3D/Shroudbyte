@@ -1,4 +1,4 @@
-"""Centralized stylesheet for Blade Browser — Forged Dark theme."""
+"""Centralized stylesheet for Shroudbyte — Forged Dark theme."""
 
 # ── Colour palette — warm, premium dark ──────────────────────────
 BG_DARK = "#0c0b10"        # deepest background — warm near-black

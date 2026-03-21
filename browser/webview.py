@@ -11,7 +11,7 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import QApplication, QDialog, QMenu, QVBoxLayout
 
 
-class BladePage(QWebEnginePage):
+class ShroudPage(QWebEnginePage):
     """Custom page that handles new-window requests and HTTPS-only mode."""
 
     def __init__(self, profile, parent=None):
@@ -26,9 +26,6 @@ class BladePage(QWebEnginePage):
             if new_view is not None:
                 return new_view.page()
         return None
-
-    def certificateError(self, error):
-        return True
 
     # Loopback IPs that Chromium blocks when a SOCKS proxy is active.
     # Rewrite them to "localhost" which Chromium allows through.
@@ -60,13 +57,13 @@ class BladePage(QWebEnginePage):
         return super().acceptNavigationRequest(url, nav_type, is_main_frame)
 
 
-class BladeWebView(QWebEngineView):
+class ShroudWebView(QWebEngineView):
     """WebEngineView subclass with tab integration and context menus."""
 
     def __init__(self, profile, tab_widget=None, parent=None):
         super().__init__(parent)
         self._tab_widget = tab_widget
-        page = BladePage(profile, self)
+        page = ShroudPage(profile, self)
         page._view_ref = self
         self.setPage(page)
 

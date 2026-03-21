@@ -1,4 +1,4 @@
-"""HMAC-SHA256 signing for authenticated DNS queries between Blade Browser
+"""HMAC-SHA256 signing for authenticated DNS queries between Shroudbyte
 and a pfSense DNS server.
 
 Provides request signing/verification and minimal DNS wire-format

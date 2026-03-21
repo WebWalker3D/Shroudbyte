@@ -1,9 +1,9 @@
 [Desktop Entry]
-Name=Blade Browser
+Name=Shroudbyte
 Comment=A custom Linux web browser
-Exec=/home/blaine/Blade-Browser/blade-browser.sh
+Exec=/home/blaine/Shroudbyte/shroudbyte.sh
 Type=Application
 Categories=Network;WebBrowser;
-Icon=/home/blaine/Blade-Browser/blade-browser-icon.svg
+Icon=/home/blaine/Shroudbyte/shroudbyte-icon.svg
 Terminal=false
 StartupNotify=true

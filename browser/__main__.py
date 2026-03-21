@@ -1,4 +1,4 @@
-"""Entry point for Blade Browser."""
+"""Entry point for Shroudbyte."""
 
 import fcntl
 import os
@@ -36,11 +36,12 @@ _proxy_instance = None
 
 if _settings.get("custom_dns_enabled") and _settings.get("custom_dns_server") and _settings.get("custom_dns_secret"):
     # Custom authenticated DNS via local SOCKS5 proxy
-    from .dns_proxy import BladeSOCKS5Proxy
-    _proxy_instance = BladeSOCKS5Proxy(
+    from .dns_proxy import ShroudSOCKS5Proxy
+    _proxy_instance = ShroudSOCKS5Proxy(
         pfsense_url=_settings["custom_dns_server"],
         shared_secret=_settings["custom_dns_secret"],
         fallback=_settings.get("custom_dns_fallback", True),
+        cert_fingerprint=_settings.get("custom_dns_cert_fingerprint", ""),
     )
     _proxy_port = _proxy_instance.start()
 
@@ -61,6 +62,11 @@ else:
             _chromium_flags += f" --dns-over-https-templates={_doh_provider}"
         os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _chromium_flags.strip()
 
+# Register the shroud:// scheme before QApplication is created — Qt requires
+# custom URL schemes to be registered before the first QGuiApplication instance.
+from .scheme import register_shroud_scheme
+register_shroud_scheme()
+
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
@@ -75,7 +81,7 @@ _lock_file = None
 def _acquire_single_instance_lock():
     """Try to acquire an exclusive lock. Returns True if we are the only instance."""
     global _lock_file
-    lock_path = _storage.DATA_DIR / "blade.lock"
+    lock_path = _storage.DATA_DIR / "shroudbyte.lock"
     _storage.DATA_DIR.mkdir(parents=True, exist_ok=True)
     _lock_file = open(lock_path, "w")
     try:
@@ -112,7 +118,7 @@ layout = QVBoxLayout(w)
 layout.setContentsMargins(0, 0, 0, 0)
 layout.setSpacing(8)
 
-title = QLabel("Blade Browser")
+title = QLabel("Shroudbyte")
 title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 title.setFont(QFont("sans-serif", 22, QFont.Weight.Bold))
 title.setStyleSheet("color: #e4e4e9; background: transparent;")
@@ -144,7 +150,7 @@ sys.exit(app.exec())
 
 def main():
     if not _acquire_single_instance_lock():
-        print("Blade Browser is already running.", file=sys.stderr)
+        print("Shroudbyte is already running.", file=sys.stderr)
         sys.exit(0)
 
     splash_proc = None
@@ -155,7 +161,7 @@ def main():
 
         app = QApplication(sys.argv)
         app.setApplicationName(__app_name__)
-        app.setOrganizationName("BladeBrowser")
+        app.setOrganizationName("Shroudbyte")
 
         # Dark palette for dialogs and system widgets
         from PyQt6.QtGui import QPalette

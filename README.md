@@ -1,4 +1,4 @@
-# Blade Browser
+# Shroudbyte
 
 A privacy-focused web browser built with PyQt6 and Chromium (QtWebEngine) for Linux.
 
@@ -20,6 +20,7 @@ A privacy-focused web browser built with PyQt6 and Chromium (QtWebEngine) for Li
 - Custom homepage
 - Zoom controls (25–500%)
 - Private browsing mode
+- Internal `shroud://` pages (`shroud://newtab`, `shroud://about`)
 
 ### Privacy & Security
 - **Ad & Tracker Blocker** — 111+ hardcoded blocked domains plus downloadable filter lists (EasyList, EasyPrivacy, Fanboy's Annoyance, Peter Lowe's, URLhaus)
@@ -53,8 +54,8 @@ A privacy-focused web browser built with PyQt6 and Chromium (QtWebEngine) for Li
 ## Installation
 
 ```bash
-git clone git@github.com:WebWalker3D/Blade-Browser.git
-cd Blade-Browser
+git clone git@github.com:WebWalker3D/Shroudbyte.git
+cd Shroudbyte
 pip install -r requirements.txt
 ```
 
@@ -63,11 +64,11 @@ pip install -r requirements.txt
 Copy the desktop file and launcher script to integrate with your desktop environment:
 
 ```bash
-cp blade-browser.desktop ~/.local/share/applications/
-chmod +x blade-browser.sh
+cp shroudbyte.desktop ~/.local/share/applications/
+chmod +x shroudbyte.sh
 ```
 
-Edit `blade-browser.desktop` and `blade-browser.sh` to match your install path.
+Edit `shroudbyte.desktop` and `shroudbyte.sh` to match your install path.
 
 ## Usage
 
@@ -75,7 +76,7 @@ Edit `blade-browser.desktop` and `blade-browser.sh` to match your install path.
 # Any of these work:
 python3 -m browser
 python3 run.py
-./blade-browser.sh
+./shroudbyte.sh
 ```
 
 ## Keyboard Shortcuts
@@ -109,10 +110,10 @@ python3 run.py
 
 ## Data Storage
 
-All browser data is stored in `~/.blade-browser/` (override with `BLADE_DATA_DIR` environment variable):
+All browser data is stored in `~/.shroudbyte/` (override with `SHROUDBYTE_DATA_DIR` environment variable):
 
 ```
-~/.blade-browser/
+~/.shroudbyte/
 ├── bookmarks.json
 ├── history.json
 ├── settings.json
@@ -132,6 +133,7 @@ All browser data is stored in `~/.blade-browser/` (override with `BLADE_DATA_DIR
 browser/
 ├── __main__.py       # Entry point, DNS-over-HTTPS config, Qt app setup
 ├── mainwindow.py     # Main window, tabs, toolbar, UI, content blocking injection
+├── scheme.py         # shroud:// URL scheme handler for internal pages
 ├── adblock.py        # Network-level request interceptor, DNT, param stripping
 ├── filterlists.py    # Filter list download, parsing, cosmetic CSS generation
 ├── fingerprint.py    # Fingerprint resistance JavaScript injection

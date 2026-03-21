@@ -11,8 +11,8 @@ def get_fingerprint_resistance_js() -> str:
     return """
 (function() {
     'use strict';
-    if (window.__bladeFingerprintResistance) return;
-    window.__bladeFingerprintResistance = true;
+    if (window.__shroudFingerprintResistance) return;
+    window.__shroudFingerprintResistance = true;
 
     // --- Seed a simple PRNG per page load (consistent within a page) ---
     var seed = Math.floor(Math.random() * 2147483647);

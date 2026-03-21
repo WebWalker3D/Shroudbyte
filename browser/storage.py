@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 
-DATA_DIR = Path(os.environ.get("BLADE_DATA_DIR", Path.home() / ".blade-browser"))
+DATA_DIR = Path(os.environ.get("SHROUDBYTE_DATA_DIR", Path.home() / ".shroudbyte"))
 
 
 def _ensure_dir():
@@ -112,6 +112,7 @@ DEFAULT_SETTINGS = {
     "custom_dns_server": "",
     "custom_dns_secret": "",
     "custom_dns_fallback": True,
+    "custom_dns_cert_fingerprint": "",
 }
 
 
@@ -141,7 +142,7 @@ def save_blocked_hosts(hosts):
     _ensure_dir()
     path = DATA_DIR / "blocked_hosts.txt"
     with open(path, "w") as f:
-        f.write("# Blade Browser blocked hosts list\n")
+        f.write("# Shroudbyte blocked hosts list\n")
         for h in sorted(hosts):
             f.write(h + "\n")
 
@@ -181,7 +182,7 @@ def get_url_suggestions(limit=500):
 
     for entry in load_history():
         url = entry.get("url", "")
-        if not url or url.startswith("blade:"):
+        if not url or url.startswith("shroud:"):
             continue
         freq[url] = freq.get(url, 0) + 1
         if url not in titles:

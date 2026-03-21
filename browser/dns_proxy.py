@@ -1,6 +1,6 @@
 """SOCKS5 proxy server with authenticated DNS resolution via pfSense DoH.
 
-Runs as a daemon thread inside the Blade Browser process, listening on
+Runs as a daemon thread inside the Shroudbyte process, listening on
 127.0.0.1 with an OS-assigned port.  When a SOCKS5 CONNECT targets a
 domain name (ATYP 0x03), the domain is resolved through an
 HMAC-authenticated DNS-over-HTTPS query to a pfSense server.  All other
@@ -11,12 +11,15 @@ DNS transport: application/dns-message over HTTPS (RFC 8484 style).
 """
 
 import asyncio
+import hashlib
+import http.client
 import logging
 import socket
 import ssl
 import struct
 import threading
 import time
+import urllib.parse
 import urllib.request
 from functools import partial
 from typing import Optional
@@ -47,7 +50,7 @@ _MAX_TTL = 300
 _BUF_SIZE = 8192
 
 
-class BladeSOCKS5Proxy:
+class ShroudSOCKS5Proxy:
     """SOCKS5 proxy with authenticated DoH resolution against pfSense."""
 
     def __init__(
@@ -55,18 +58,24 @@ class BladeSOCKS5Proxy:
         pfsense_url: str,
         shared_secret: str,
         fallback: bool = True,
+        cert_fingerprint: str = "",
     ) -> None:
         """
         Args:
             pfsense_url: DoH endpoint, e.g.
-                ``"https://pfsense.local:8853/blade-dns-query"``.
+                ``"https://pfsense.local:8853/shroud-dns-query"``.
             shared_secret: Hex-encoded HMAC-SHA256 shared secret.
             fallback: If *True*, fall back to system DNS when pfSense is
                 unreachable.
+            cert_fingerprint: Expected SHA-256 fingerprint of the server's
+                TLS certificate (hex).  When set, the proxy pins the cert
+                and rejects connections whose fingerprint doesn't match.
+                When empty, verification is skipped (legacy behaviour).
         """
         self._pfsense_url = pfsense_url
         self._shared_secret = bytes.fromhex(shared_secret)
         self._fallback = fallback
+        self._cert_fingerprint = cert_fingerprint.lower().strip()
 
         self._dns_cache: dict[str, tuple[list[str], float]] = {}
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -75,12 +84,33 @@ class BladeSOCKS5Proxy:
         self._port: int = 0
         self._started = threading.Event()
 
-        # TODO: Make certificate verification configurable instead of
-        # blanket-disabling it.  pfSense deployments commonly use
-        # self-signed certificates, so we skip verification for now.
-        self._ssl_ctx = ssl.create_default_context()
-        self._ssl_ctx.check_hostname = False
-        self._ssl_ctx.verify_mode = ssl.CERT_NONE
+    # ------------------------------------------------------------------
+    # TLS certificate pinning
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_noverify_ctx() -> ssl.SSLContext:
+        """Create a TLS context that skips certificate verification."""
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+
+    def _verify_cert_fingerprint(self, sock: ssl.SSLSocket) -> None:
+        """Check the peer cert fingerprint on an already-connected TLS socket.
+
+        Raises ``ssl.SSLError`` if a fingerprint is configured and the
+        peer cert doesn't match.
+        """
+        if not self._cert_fingerprint:
+            return
+        der = sock.getpeercert(binary_form=True)
+        actual = hashlib.sha256(der).hexdigest()
+        if actual != self._cert_fingerprint:
+            raise ssl.SSLError(
+                f"Certificate fingerprint mismatch: "
+                f"expected {self._cert_fingerprint}, got {actual}"
+            )
 
     # ------------------------------------------------------------------
     # Public interface
@@ -109,6 +139,7 @@ class BladeSOCKS5Proxy:
         pfsense_url: str = None,
         shared_secret: str = None,
         fallback: bool = None,
+        cert_fingerprint: str = None,
     ) -> None:
         """Update configuration at runtime (e.g. from a settings dialog).
 
@@ -122,6 +153,8 @@ class BladeSOCKS5Proxy:
                 self._shared_secret = bytes.fromhex(shared_secret)
             if fallback is not None:
                 self._fallback = fallback
+            if cert_fingerprint is not None:
+                self._cert_fingerprint = cert_fingerprint.lower().strip()
             # Flush the cache when credentials change.
             self._dns_cache.clear()
 
@@ -348,9 +381,9 @@ class BladeSOCKS5Proxy:
             headers={
                 "Content-Type": "application/dns-message",
                 "Accept": "application/dns-message",
-                "X-Blade-Timestamp": timestamp,
-                "X-Blade-Nonce": nonce,
-                "X-Blade-Signature": signature,
+                "X-Shroud-Timestamp": timestamp,
+                "X-Shroud-Nonce": nonce,
+                "X-Shroud-Signature": signature,
             },
         )
 
@@ -366,9 +399,32 @@ class BladeSOCKS5Proxy:
         return ips
 
     def _do_https_request(self, req: urllib.request.Request) -> bytes:
-        """Perform the blocking HTTPS request (called via run_in_executor)."""
-        with urllib.request.urlopen(req, context=self._ssl_ctx, timeout=5) as resp:
+        """Perform the blocking HTTPS request with cert-fingerprint pinning.
+
+        Uses ``http.client.HTTPSConnection`` so the fingerprint can be
+        verified on the *same* TLS socket before any application data is
+        sent — no TOCTOU gap.
+        """
+        parsed = urllib.parse.urlparse(req.full_url)
+        conn = http.client.HTTPSConnection(
+            parsed.hostname,
+            parsed.port or 443,
+            context=self._make_noverify_ctx(),
+            timeout=5,
+        )
+        try:
+            conn.connect()
+            self._verify_cert_fingerprint(conn.sock)
+            conn.request(
+                req.get_method(),
+                parsed.path,
+                body=req.data,
+                headers=dict(req.headers),
+            )
+            resp = conn.getresponse()
             return resp.read()
+        finally:
+            conn.close()
 
     @staticmethod
     async def _resolve_system(domain: str) -> list[str]:

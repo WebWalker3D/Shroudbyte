@@ -1,4 +1,4 @@
-"""Global crash handler for Blade Browser.
+"""Global crash handler for Shroudbyte.
 
 Catches unhandled exceptions, logs them to a crash file, and shows a
 dialog so the user can see what went wrong instead of a silent exit.
@@ -14,7 +14,7 @@ from . import storage
 
 CRASH_LOG = storage.DATA_DIR / "crash.log"
 
-logger = logging.getLogger("blade.crash")
+logger = logging.getLogger("shroudbyte.crash")
 
 # Maximum crash log size before it gets rotated (512 KB).
 _MAX_LOG_BYTES = 512 * 1024
@@ -65,9 +65,9 @@ def _show_crash_dialog(report: str):
             return
 
         box = QMessageBox()
-        box.setWindowTitle("Blade Browser — Crash Report")
+        box.setWindowTitle("Shroudbyte — Crash Report")
         box.setIcon(QMessageBox.Icon.Critical)
-        box.setText("Blade Browser encountered an unexpected error and needs to close.")
+        box.setText("Shroudbyte encountered an unexpected error and needs to close.")
         box.setInformativeText(f"Details have been saved to:\n{CRASH_LOG}")
         box.setDetailedText(report)
         box.setStandardButtons(QMessageBox.StandardButton.Close)

@@ -1,4 +1,4 @@
-"""Password manager UI dialogs for Blade Browser."""
+"""Password manager UI dialogs for Shroudbyte."""
 
 import time
 

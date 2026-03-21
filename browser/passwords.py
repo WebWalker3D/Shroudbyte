@@ -1,8 +1,8 @@
-"""Encrypted password vault for Blade Browser.
+"""Encrypted password vault for Shroudbyte.
 
 Uses Fernet (AES-128-CBC + HMAC) with a PBKDF2-derived key from a master password.
-Vault stored as an encrypted JSON blob at ~/.blade-browser/passwords.enc
-Salt stored at ~/.blade-browser/passwords.salt
+Vault stored as an encrypted JSON blob at ~/.shroudbyte/passwords.enc
+Salt stored at ~/.shroudbyte/passwords.salt
 """
 
 import base64
@@ -62,7 +62,7 @@ class PasswordVault:
         f = Fernet(key)
 
         # Store an encrypted sentinel so we can verify the password later
-        (DATA_DIR / VERIFY_FILE).write_bytes(f.encrypt(b"blade-browser-vault"))
+        (DATA_DIR / VERIFY_FILE).write_bytes(f.encrypt(b"shroudbyte-vault"))
 
         self._fernet = f
         self._entries = []

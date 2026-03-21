@@ -1,4 +1,4 @@
-"""Downloadable filter list management for Blade Browser ad/tracker blocking.
+"""Downloadable filter list management for Shroudbyte ad/tracker blocking.
 
 Supports both hosts-file format and ABP/adblock-plus rule format.
 Extracts domain blocks and cosmetic (CSS) hiding rules.
@@ -142,7 +142,7 @@ def download_list(list_id: str, timeout: int = 30) -> bool:
     try:
         req = urllib.request.Request(
             info["url"],
-            headers={"User-Agent": "BladeBrowser/1.0"},
+            headers={"User-Agent": "Shroudbyte/1.0"},
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = resp.read().decode("utf-8", errors="replace")

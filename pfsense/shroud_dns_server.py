@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Blade DNS Server — Authenticated DNS-over-HTTPS relay for pfSense.
+Shroud DNS Server — Authenticated DNS-over-HTTPS relay for pfSense.
 
-Receives HMAC-signed DNS queries over HTTPS from Blade Browser's SOCKS5
+Receives HMAC-signed DNS queries over HTTPS from Shroudbyte's SOCKS5
 proxy, validates the signature, forwards to local Unbound on 127.0.0.1:53,
 and returns the raw DNS response.
 
@@ -10,17 +10,17 @@ Requires only Python stdlib. Designed for FreeBSD / pfSense environments.
 
 Usage:
     # Generate a shared secret:
-    python3 -c "import secrets; print(secrets.token_hex(32))" > /usr/local/etc/blade_dns.key
+    python3 -c "import secrets; print(secrets.token_hex(32))" > /usr/local/etc/shroud_dns.key
 
     # Run the server:
-    python3 blade_dns_server.py \\
+    python3 shroud_dns_server.py \\
         --port 8853 \\
-        --cert /usr/local/etc/blade_dns/cert.pem \\
-        --key /usr/local/etc/blade_dns/key.pem \\
-        --secret-file /usr/local/etc/blade_dns.key
+        --cert /usr/local/etc/shroud_dns/cert.pem \\
+        --key /usr/local/etc/shroud_dns/key.pem \\
+        --secret-file /usr/local/etc/shroud_dns.key
 
     # Or with all defaults:
-    python3 blade_dns_server.py
+    python3 shroud_dns_server.py
 """
 
 import argparse
@@ -45,7 +45,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%dT%H:%M:%S",
     stream=sys.stdout,
 )
-log = logging.getLogger("blade-dns")
+log = logging.getLogger("shroud-dns")
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -118,7 +118,7 @@ def make_handler(shared_secret: bytes, nonce_tracker: NonceTracker,
                  unbound_host: str, unbound_port: int):
     """Factory that returns a request handler class with bound config."""
 
-    class BladeHandler(BaseHTTPRequestHandler):
+    class ShroudHandler(BaseHTTPRequestHandler):
         # Suppress default stderr logging; we use our own logger.
         def log_message(self, fmt, *args):
             log.info("%s %s", self.client_address[0], fmt % args)
@@ -134,7 +134,7 @@ def make_handler(shared_secret: bytes, nonce_tracker: NonceTracker,
         # ---- DNS query ---------------------------------------------------
 
         def do_POST(self):
-            if self.path != "/blade-dns-query":
+            if self.path != "/shroud-dns-query":
                 self._send_text(404, "not found")
                 return
 
@@ -163,9 +163,9 @@ def make_handler(shared_secret: bytes, nonce_tracker: NonceTracker,
         # ---- Auth helpers ------------------------------------------------
 
         def _authenticate(self, body: bytes) -> bool:
-            ts_str = self.headers.get("X-Blade-Timestamp", "")
-            nonce = self.headers.get("X-Blade-Nonce", "")
-            sig_hex = self.headers.get("X-Blade-Signature", "")
+            ts_str = self.headers.get("X-Shroud-Timestamp", "")
+            nonce = self.headers.get("X-Shroud-Nonce", "")
+            sig_hex = self.headers.get("X-Shroud-Signature", "")
 
             if not ts_str or not nonce or not sig_hex:
                 log.warning("Missing auth headers from %s",
@@ -222,7 +222,7 @@ def make_handler(shared_secret: bytes, nonce_tracker: NonceTracker,
             self.end_headers()
             self.wfile.write(data)
 
-    return BladeHandler
+    return ShroudHandler
 
 
 # ---------------------------------------------------------------------------
@@ -232,19 +232,19 @@ def make_handler(shared_secret: bytes, nonce_tracker: NonceTracker,
 
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Blade DNS — authenticated DoH relay for pfSense")
+        description="Shroud DNS — authenticated DoH relay for pfSense")
     p.add_argument("--port", type=int, default=8853,
                    help="HTTPS listen port (default: 8853)")
     p.add_argument("--listen", default="0.0.0.0",
                    help="Bind address (default: 0.0.0.0)")
     p.add_argument("--secret-file",
-                   default="/usr/local/etc/blade_dns.key",
+                   default="/usr/local/etc/shroud_dns.key",
                    help="Path to hex-encoded shared secret")
     p.add_argument("--cert",
-                   default="/usr/local/etc/blade_dns/cert.pem",
+                   default="/usr/local/etc/shroud_dns/cert.pem",
                    help="TLS certificate PEM file")
     p.add_argument("--key",
-                   default="/usr/local/etc/blade_dns/key.pem",
+                   default="/usr/local/etc/shroud_dns/key.pem",
                    help="TLS private key PEM file")
     p.add_argument("--unbound", default="127.0.0.1:53",
                    help="Unbound address as host:port (default: 127.0.0.1:53)")
@@ -291,7 +291,7 @@ def main() -> None:
     ctx.load_cert_chain(certfile=args.cert, keyfile=args.key)
     server.socket = ctx.wrap_socket(server.socket, server_side=True)
 
-    log.info("Blade DNS server listening on https://%s:%d", args.listen, args.port)
+    log.info("Shroud DNS server listening on https://%s:%d", args.listen, args.port)
 
     try:
         server.serve_forever()

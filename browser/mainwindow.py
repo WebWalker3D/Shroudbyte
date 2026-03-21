@@ -49,17 +49,17 @@ from PyQt6.QtGui import QStandardItemModel, QStandardItem
 
 from . import __app_name__, __version__, storage
 from .adblock import AdBlockInterceptor
-from .downloads import DownloadManager
+from .downloads import DownloadShelf
 from . import filterlists
 from .fingerprint import get_fingerprint_resistance_js
-from .newtab import generate_new_tab_html
 from .passwords import PasswordVault
 from .passworddialogs import (
     MasterPasswordDialog,
     PasswordManagerDialog,
     PasswordSaveBar,
 )
-from .webview import BladeWebView
+from .scheme import ShroudSchemeHandler
+from .webview import ShroudWebView
 from . import style
 
 
@@ -151,7 +151,7 @@ class MainWindow(QMainWindow):
             os.makedirs(profile_dir, exist_ok=True)
             os.makedirs(cache_dir, exist_ok=True)
 
-            self._profile = QWebEngineProfile("blade", self)
+            self._profile = QWebEngineProfile("shroudbyte", self)
             self._profile.setPersistentStoragePath(profile_dir)
             self._profile.setCachePath(cache_dir)
             self._profile.setPersistentCookiesPolicy(
@@ -159,6 +159,10 @@ class MainWindow(QMainWindow):
             )
 
         self._apply_profile_settings()
+
+        # shroud:// scheme handler
+        self._scheme_handler = ShroudSchemeHandler(self._profile, parent=self)
+        self._profile.installUrlSchemeHandler(b"shroud", self._scheme_handler)
 
         # Ad blocker
         self._adblocker = AdBlockInterceptor(self)
@@ -170,8 +174,8 @@ class MainWindow(QMainWindow):
             self._install_content_blocking_script()
 
         # Downloads
-        self._download_manager = DownloadManager(self)
-        self._profile.downloadRequested.connect(self._download_manager.handle_download)
+        self._download_shelf = DownloadShelf(self)
+        self._profile.downloadRequested.connect(self._download_shelf.handle_download)
 
         # Password vault
         self._vault = PasswordVault()
@@ -230,7 +234,7 @@ class MainWindow(QMainWindow):
                 deferred = getattr(view, "_deferred_url", None)
                 url = deferred or view.url().toString()
                 title = view.title() or self._tabs.tabText(i)
-                if url and not url.startswith("blade:"):
+                if url and not url.startswith("shroud:"):
                     tabs.append({"url": url, "title": title})
         if tabs:
             storage.save_session(tabs)
@@ -372,6 +376,9 @@ class MainWindow(QMainWindow):
         self._central_layout.addWidget(self._progress)
 
         self._central_layout.addWidget(self._tabs)
+
+        # Download shelf (hidden by default, shown when a download starts)
+        self._central_layout.addWidget(self._download_shelf)
 
         # Find bar (hidden by default)
         self._find_bar = self._create_find_bar()
@@ -558,7 +565,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def add_new_tab(self, url=None):
-        view = BladeWebView(self._profile, tab_widget=self)
+        view = ShroudWebView(self._profile, tab_widget=self)
         view.setZoomFactor(self._settings.get("default_zoom", 100) / 100.0)
         view.page().https_only = self._settings.get("https_only", False)
 
@@ -574,9 +581,7 @@ class MainWindow(QMainWindow):
         view.page().fullScreenRequested.connect(self._handle_fullscreen_request)
 
         if url is None:
-            # Show the custom new-tab page
-            html = generate_new_tab_html()
-            view.setHtml(html, QUrl("blade://newtab"))
+            view.load(QUrl("shroud://newtab"))
         else:
             if isinstance(url, str):
                 url = QUrl(url)
@@ -592,7 +597,7 @@ class MainWindow(QMainWindow):
         # Save to closed tabs stack for Ctrl+Shift+T
         url = widget.url().toString()
         title = widget.title()
-        if url and not url.startswith("blade:"):
+        if url and not url.startswith("shroud:"):
             self._closed_tabs.append({"url": url, "title": title})
             if len(self._closed_tabs) > 20:
                 self._closed_tabs = self._closed_tabs[-20:]
@@ -631,7 +636,7 @@ class MainWindow(QMainWindow):
         # Record in history (skip private mode)
         if not self._private_mode and title:
             url = view.url().toString()
-            if url and not url.startswith("blade:"):
+            if url and not url.startswith("shroud:"):
                 storage.add_history_entry(title, url)
                 self._refresh_suggestions()
 
@@ -658,7 +663,7 @@ class MainWindow(QMainWindow):
 
         # Treat as a URL if it already has a scheme, contains a dot, or
         # looks like a localhost/IP address (with optional port).
-        has_scheme = text.startswith(("http://", "https://", "file://"))
+        has_scheme = text.startswith(("http://", "https://", "file://", "shroud://"))
         looks_like_url = (
             has_scheme
             or ("." in text and " " not in text)
@@ -684,11 +689,10 @@ class MainWindow(QMainWindow):
         self.add_new_tab()
 
     def _update_url_bar(self, url):
-        url_str = url.toString()
-        if url_str.startswith("blade://"):
+        if url.scheme() == "shroud" and url.host() == "newtab":
             self._url_bar.setText("")
         else:
-            self._url_bar.setText(url_str)
+            self._url_bar.setText(url.toString())
             self._url_bar.setCursorPosition(0)
 
     def _update_title(self, title):
@@ -742,11 +746,11 @@ class MainWindow(QMainWindow):
         self._update_adblock_label()
         if ok:
             view = self._current_view()
-            if view and not view.url().toString().startswith("blade:"):
+            if view and not view.url().toString().startswith("shroud:"):
                 # Inject cosmetic CSS (ad hiding + cookie banners)
                 if self._cosmetic_css and self._settings.get("enable_adblock", True):
                     css_js = "var s=document.createElement('style');" \
-                             "s.id='blade-cosmetic-css';" \
+                             "s.id='shroud-cosmetic-css';" \
                              "s.textContent=" + json.dumps(self._cosmetic_css) + ";" \
                              "document.head.appendChild(s);"
                     view.page().runJavaScript(css_js)
@@ -762,7 +766,7 @@ class MainWindow(QMainWindow):
     def _install_content_blocking_script(self):
         """Install a user script that blocks ad scripts at document creation time."""
         script = QWebEngineScript()
-        script.setName("blade-script-blocker")
+        script.setName("shroud-script-blocker")
         script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
         script.setWorldId(QWebEngineScript.ScriptWorldId.ApplicationWorld)
         script.setRunsOnSubFrames(True)
@@ -811,8 +815,8 @@ class MainWindow(QMainWindow):
     def _get_content_blocking_js(self):
         """Return JS that dynamically hides ad elements and blocks ad scripts."""
         return """(function() {
-            if (window.__bladeContentBlock) return;
-            window.__bladeContentBlock = true;
+            if (window.__shroudContentBlock) return;
+            window.__shroudContentBlock = true;
 
             // Blocked script URL patterns
             var blockedScriptPatterns = [
@@ -1074,8 +1078,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _show_downloads(self):
-        self._download_manager.show()
-        self._download_manager.raise_()
+        self._download_shelf.toggle()
 
     # ------------------------------------------------------------------
     # Print / Save as PDF
@@ -1176,7 +1179,7 @@ class MainWindow(QMainWindow):
         view = self._current_view()
         if not view:
             return
-        devtools = BladeWebView(self._profile, tab_widget=self)
+        devtools = ShroudWebView(self._profile, tab_widget=self)
         view.page().setDevToolsPage(devtools.page())
         i = self._tabs.addTab(devtools, "DevTools")
         self._tabs.setCurrentIndex(i)
@@ -1420,7 +1423,7 @@ class MainWindow(QMainWindow):
 
         layout.addRow("Restore Session", session_check)
 
-        # --- Custom DNS (Blade DNS) section ---
+        # --- Custom DNS (Shroud DNS) section ---
         dns_separator = QLabel("── Custom DNS ──")
         dns_separator.setStyleSheet(f"color: {style.TEXT_DIM}; font-size: 12px;")
         dns_separator.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1430,8 +1433,8 @@ class MainWindow(QMainWindow):
         custom_dns_check.setChecked(self._settings.get("custom_dns_enabled", False))
 
         custom_dns_server = QLineEdit(self._settings.get("custom_dns_server", ""))
-        custom_dns_server.setPlaceholderText("https://pfsense.local:8853/blade-dns-query")
-        custom_dns_server.setToolTip("URL of your Blade DNS server on pfSense")
+        custom_dns_server.setPlaceholderText("https://pfsense.local:8853/shroud-dns-query")
+        custom_dns_server.setToolTip("URL of your Shroud DNS server on pfSense")
 
         custom_dns_secret = QLineEdit(self._settings.get("custom_dns_secret", ""))
         custom_dns_secret.setEchoMode(QLineEdit.EchoMode.Password)
@@ -1440,9 +1443,14 @@ class MainWindow(QMainWindow):
         custom_dns_fallback = QCheckBox("Fall back to system DNS if server unreachable")
         custom_dns_fallback.setChecked(self._settings.get("custom_dns_fallback", True))
 
+        custom_dns_fingerprint = QLineEdit(self._settings.get("custom_dns_cert_fingerprint", ""))
+        custom_dns_fingerprint.setPlaceholderText("SHA-256 fingerprint (hex) — leave empty to skip verification")
+        custom_dns_fingerprint.setToolTip("Pin the server's TLS certificate by its SHA-256 fingerprint")
+
         layout.addRow("Custom DNS", custom_dns_check)
         layout.addRow("DNS Server URL", custom_dns_server)
         layout.addRow("Auth Secret", custom_dns_secret)
+        layout.addRow("Cert Fingerprint", custom_dns_fingerprint)
         layout.addRow("", custom_dns_fallback)
 
         custom_dns_note = QLabel(
@@ -1459,6 +1467,7 @@ class MainWindow(QMainWindow):
             doh_provider_edit.setEnabled(not custom)
             custom_dns_server.setEnabled(custom)
             custom_dns_secret.setEnabled(custom)
+            custom_dns_fingerprint.setEnabled(custom)
             custom_dns_fallback.setEnabled(custom)
 
         custom_dns_check.toggled.connect(_toggle_dns_sections)
@@ -1505,6 +1514,7 @@ class MainWindow(QMainWindow):
             self._settings["custom_dns_server"] = custom_dns_server.text().strip()
             self._settings["custom_dns_secret"] = custom_dns_secret.text().strip()
             self._settings["custom_dns_fallback"] = custom_dns_fallback.isChecked()
+            self._settings["custom_dns_cert_fingerprint"] = custom_dns_fingerprint.text().strip()
             storage.save_settings(self._settings)
 
             # Update proxy config at runtime if it's running
@@ -1513,6 +1523,7 @@ class MainWindow(QMainWindow):
                     pfsense_url=self._settings["custom_dns_server"],
                     shared_secret=self._settings["custom_dns_secret"],
                     fallback=self._settings["custom_dns_fallback"],
+                    cert_fingerprint=self._settings["custom_dns_cert_fingerprint"],
                 )
 
             self._apply_profile_settings()
@@ -1616,7 +1627,7 @@ class MainWindow(QMainWindow):
         if not view:
             return
         url = view.url().toString()
-        if url.startswith("blade:"):
+        if url.startswith("shroud:"):
             return
         # Inject JS that:
         # 1. Counts visible password fields
@@ -1627,9 +1638,9 @@ class MainWindow(QMainWindow):
             var visible = 0;
             pwInputs.forEach(function(i) { if (i.offsetParent !== null) visible++; });
 
-            if (visible > 0 && !window.__bladePasswordHooked) {
-                window.__bladePasswordHooked = true;
-                window.__bladeCapturedCreds = null;
+            if (visible > 0 && !window.__shroudPasswordHooked) {
+                window.__shroudPasswordHooked = true;
+                window.__shroudCapturedCreds = null;
 
                 document.addEventListener('submit', function(e) {
                     var form = e.target;
@@ -1647,7 +1658,7 @@ class MainWindow(QMainWindow):
                             break;
                         }
                     }
-                    window.__bladeCapturedCreds = {
+                    window.__shroudCapturedCreds = {
                         username: username,
                         password: pw.value,
                         url: window.location.href
@@ -1678,7 +1689,7 @@ class MainWindow(QMainWindow):
                             }
                         }
                         if (pw.value) {
-                            window.__bladeCapturedCreds = {
+                            window.__shroudCapturedCreds = {
                                 username: username,
                                 password: pw.value,
                                 url: window.location.href
@@ -1708,8 +1719,8 @@ class MainWindow(QMainWindow):
             return
         js = """
         (function() {
-            var c = window.__bladeCapturedCreds;
-            window.__bladeCapturedCreds = null;
+            var c = window.__shroudCapturedCreds;
+            window.__shroudCapturedCreds = null;
             return c;
         })();
         """
@@ -1894,7 +1905,7 @@ class MainWindow(QMainWindow):
                 for i, tab_info in enumerate(session):
                     url = tab_info.get("url", "")
                     title = tab_info.get("title", "")
-                    if url and not url.startswith("blade:"):
+                    if url and not url.startswith("shroud:"):
                         if i == 0:
                             # Load the first tab immediately
                             self.add_new_tab(url)
@@ -1907,7 +1918,7 @@ class MainWindow(QMainWindow):
 
     def _add_lazy_tab(self, url, title=""):
         """Create a tab that doesn't load until selected."""
-        view = BladeWebView(self._profile, tab_widget=self)
+        view = ShroudWebView(self._profile, tab_widget=self)
         view.setZoomFactor(self._settings.get("default_zoom", 100) / 100.0)
         view.page().https_only = self._settings.get("https_only", False)
         view._deferred_url = url
@@ -1932,7 +1943,7 @@ class MainWindow(QMainWindow):
             f'<div style="text-align:center">'
             f'<div style="font-size:16px;margin-bottom:8px;">{title or url}</div>'
             f'<div>Switch to this tab to load</div></div></body></html>',
-            QUrl("blade://lazy"),
+            QUrl("shroud://lazy"),
         )
         return view
 
@@ -1947,7 +1958,7 @@ class MainWindow(QMainWindow):
                     deferred = getattr(view, "_deferred_url", None)
                     url = deferred or view.url().toString()
                     title = view.title() or self._tabs.tabText(i)
-                    if url and not url.startswith("blade:"):
+                    if url and not url.startswith("shroud:"):
                         tabs.append({"url": url, "title": title})
             if tabs:
                 storage.save_session(tabs)

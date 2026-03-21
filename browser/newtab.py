@@ -124,9 +124,9 @@ def generate_new_tab_html():
   .wordmark {{
     font-size: 48px;
     font-weight: 700;
-    letter-spacing: 16px;
+    letter-spacing: 8px;
     text-transform: uppercase;
-    text-indent: 16px;
+    text-indent: 8px;
     background: linear-gradient(
       135deg,
       {ACCENT_HOVER} 0%,
@@ -313,7 +313,7 @@ def generate_new_tab_html():
 
   <div class="content">
     <div class="greeting">{greeting}</div>
-    <div class="wordmark">Blade</div>
+    <div class="wordmark">Shroudbyte</div>
     <div class="divider"></div>
 
     <div class="search-container">
