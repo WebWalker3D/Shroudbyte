@@ -374,23 +374,17 @@ class ShroudSOCKS5Proxy:
         nonce = generate_nonce()
         signature = sign_request(self._shared_secret, timestamp, nonce, wire_query)
 
-        req = urllib.request.Request(
-            self._pfsense_url,
-            data=wire_query,
-            method="POST",
-            headers={
-                "Content-Type": "application/dns-message",
-                "Accept": "application/dns-message",
-                "X-Shroud-Timestamp": timestamp,
-                "X-Shroud-Nonce": nonce,
-                "X-Shroud-Signature": signature,
-            },
-        )
+        headers = {
+            "Content-Type": "application/dns-message",
+            "Accept": "application/dns-message",
+            "X-Shroud-Timestamp": timestamp,
+            "X-Shroud-Nonce": nonce,
+            "X-Shroud-Signature": signature,
+        }
 
-        # urllib is blocking; run it in the default thread executor.
         loop = asyncio.get_running_loop()
         response_data: bytes = await loop.run_in_executor(
-            None, partial(self._do_https_request, req)
+            None, partial(self._do_https_request, wire_query, headers)
         )
 
         ips = parse_dns_response(response_data)
@@ -398,14 +392,14 @@ class ShroudSOCKS5Proxy:
             raise OSError("DoH returned no addresses for " + domain)
         return ips
 
-    def _do_https_request(self, req: urllib.request.Request) -> bytes:
-        """Perform the blocking HTTPS request with cert-fingerprint pinning.
+    def _do_https_request(self, body: bytes, headers: dict) -> bytes:
+        """Perform a blocking HTTPS POST with cert-fingerprint pinning.
 
         Uses ``http.client.HTTPSConnection`` so the fingerprint can be
         verified on the *same* TLS socket before any application data is
         sent — no TOCTOU gap.
         """
-        parsed = urllib.parse.urlparse(req.full_url)
+        parsed = urllib.parse.urlparse(self._pfsense_url)
         conn = http.client.HTTPSConnection(
             parsed.hostname,
             parsed.port or 443,
@@ -415,12 +409,7 @@ class ShroudSOCKS5Proxy:
         try:
             conn.connect()
             self._verify_cert_fingerprint(conn.sock)
-            conn.request(
-                req.get_method(),
-                parsed.path,
-                body=req.data,
-                headers=dict(req.headers),
-            )
+            conn.request("POST", parsed.path, body=body, headers=headers)
             resp = conn.getresponse()
             return resp.read()
         finally:
