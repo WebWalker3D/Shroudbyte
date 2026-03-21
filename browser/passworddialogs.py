@@ -307,6 +307,57 @@ class _PasswordEntryDialog(QDialog):
         }
 
 
+class HttpAuthDialog(QDialog):
+    """Prompt for HTTP Basic/Digest authentication (401 challenges)."""
+
+    def __init__(self, url: str, realm: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Authentication Required")
+        self.setMinimumWidth(420)
+        self.setStyleSheet(style.PASSWORD_DIALOG_STYLE)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(14)
+        layout.setContentsMargins(24, 24, 24, 24)
+
+        info = QLabel(f"The site at <b>{url}</b> requires authentication.")
+        if realm:
+            info.setText(info.text() + f"<br>Realm: <i>{realm}</i>")
+        info.setWordWrap(True)
+        info.setStyleSheet(f"color: {style.TEXT}; font-size: 13px;")
+        layout.addWidget(info)
+
+        self._user_edit = QLineEdit()
+        self._user_edit.setPlaceholderText("Username")
+        layout.addWidget(self._user_edit)
+
+        self._pass_edit = QLineEdit()
+        self._pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._pass_edit.setPlaceholderText("Password")
+        layout.addWidget(self._pass_edit)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(8)
+        ok_btn = QPushButton("Log In")
+        ok_btn.setStyleSheet(style.DIALOG_BTN_PRIMARY_STYLE)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setStyleSheet(style.DIALOG_BTN_STYLE)
+
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+        self._user_edit.returnPressed.connect(lambda: self._pass_edit.setFocus())
+        self._pass_edit.returnPressed.connect(self.accept)
+
+        btn_layout.addStretch()
+        btn_layout.addWidget(cancel_btn)
+        btn_layout.addWidget(ok_btn)
+        layout.addLayout(btn_layout)
+
+    def credentials(self) -> tuple:
+        """Return (username, password)."""
+        return self._user_edit.text(), self._pass_edit.text()
+
+
 class PasswordSaveBar(QFrame):
     """Notification bar shown when a login form is detected with new credentials."""
 

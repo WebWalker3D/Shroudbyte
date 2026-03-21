@@ -54,6 +54,7 @@ from . import filterlists
 from .fingerprint import get_fingerprint_resistance_js
 from .passwords import PasswordVault
 from .passworddialogs import (
+    HttpAuthDialog,
     MasterPasswordDialog,
     PasswordManagerDialog,
     PasswordSaveBar,
@@ -1170,6 +1171,77 @@ class MainWindow(QMainWindow):
             self._enter_fullscreen()
         else:
             self._exit_fullscreen()
+
+    def _prompt_http_auth(self, url):
+        """Show a non-blocking auth dialog for an HTTP 401 protected URL.
+
+        Called from ShroudPage.acceptNavigationRequest when a HEAD probe
+        detects that the server requires authentication.  Chromium 134
+        crashes (SIGTRAP) on any 401 response, and setHttpHeader for
+        Authorization is silently stripped.  So we fetch the page with
+        Python's urllib and inject the HTML via setHtml().
+        """
+        host = (url.host() or "").lower()
+
+        # Guard against duplicate dialogs
+        pending = getattr(self, "_http_auth_pending", set())
+        if host in pending:
+            return
+        if not hasattr(self, "_http_auth_pending"):
+            self._http_auth_pending = set()
+        self._http_auth_pending.add(host)
+
+        url_copy = QUrl(url)
+        dlg = HttpAuthDialog(host or url.toString(), "", parent=self)
+        dlg.setModal(True)
+
+        def on_finished(result):
+            self._http_auth_pending.discard(host)
+            if result != QDialog.DialogCode.Accepted.value:
+                return
+            user, pw = dlg.credentials()
+            # Store creds so the interceptor can handle sub-resources
+            self._adblocker.set_http_auth(host, user, pw)
+            # Fetch the page with Python — Chromium must never see a 401
+            self._fetch_authed_page(url_copy, host, user, pw)
+
+        dlg.finished.connect(on_finished)
+        dlg.show()
+
+    def _fetch_authed_page(self, url, host, user, pw):
+        """Fetch a page using Python with Basic auth, inject via setHtml."""
+        import base64
+        import ssl
+        import urllib.request
+
+        url_string = url.toString()
+        token = base64.b64encode(f"{user}:{pw}".encode()).decode()
+        req = urllib.request.Request(url_string)
+        req.add_header("Authorization", f"Basic {token}")
+        req.add_header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/134.0.0.0 Safari/537.36")
+        ctx = ssl.create_default_context()
+        try:
+            resp = urllib.request.urlopen(req, timeout=15, context=ctx)
+            html = resp.read()
+            charset = resp.headers.get_content_charset() or "utf-8"
+            view = self._current_view()
+            if view:
+                # setHtml with baseUrl so relative resources resolve correctly
+                view.page().setHtml(
+                    html.decode(charset, errors="replace"), url)
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                # Wrong credentials — clear cached auth and re-prompt
+                self._adblocker.clear_http_auth(host)
+                self._prompt_http_auth(url)
+            else:
+                self._status.showMessage(
+                    f"HTTP error {e.code} loading {host}", 5000)
+        except Exception as e:
+            self._status.showMessage(
+                f"Failed to load {host}: {e}", 5000)
 
     # ------------------------------------------------------------------
     # Dev tools & view source

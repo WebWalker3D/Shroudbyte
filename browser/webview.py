@@ -1,5 +1,8 @@
 """Custom WebEngineView and WebEnginePage with context menus, HTTPS-only, and popup support."""
 
+import ssl
+import urllib.request
+
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtGui import QAction
 from PyQt6.QtWebEngineCore import (
@@ -9,6 +12,11 @@ from PyQt6.QtWebEngineCore import (
 )
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import QApplication, QDialog, QMenu, QVBoxLayout
+
+
+# Shared set of hosts known NOT to require HTTP auth.
+# Populated on successful HEAD checks; avoids repeat probes.
+_safe_hosts: set[str] = set()
 
 
 class ShroudPage(QWebEnginePage):
@@ -31,8 +39,33 @@ class ShroudPage(QWebEnginePage):
     # Rewrite them to "localhost" which Chromium allows through.
     _LOOPBACK_IPS = {"127.0.0.1", "::1", "[::1]"}
 
+    def _probe_for_auth(self, url_string):
+        """Quick HEAD request to detect 401 before Chromium sees it.
+
+        Returns True if the server requires HTTP authentication.
+        Returns False for any other response (200, 404, timeout, etc.).
+        """
+        try:
+            req = urllib.request.Request(url_string, method="HEAD")
+            ctx = ssl.create_default_context()
+            urllib.request.urlopen(req, timeout=3, context=ctx)
+            return False
+        except urllib.error.HTTPError as e:
+            return e.code == 401
+        except Exception:
+            return False
+
+    def _get_main_window(self):
+        """Walk up to the MainWindow via the view reference."""
+        view = self._view_ref
+        if view and hasattr(view, "_tab_widget"):
+            return view._tab_widget
+        return None
+
     def acceptNavigationRequest(self, url, nav_type, is_main_frame):
         """Rewrite loopback IPs to localhost and upgrade http to https."""
+        from PyQt6.QtCore import QTimer
+
         host = url.host()
 
         # Chromium blocks raw loopback IPs through a proxy — rewrite to
@@ -43,9 +76,38 @@ class ShroudPage(QWebEnginePage):
             rewritten.setHost("localhost")
             # Use QTimer.singleShot to break out of the navigation call stack
             # and avoid re-entrant setUrl inside acceptNavigationRequest.
-            from PyQt6.QtCore import QTimer
             QTimer.singleShot(0, lambda u=rewritten: self.setUrl(u))
             return False
+
+        # Chromium blocks network requests originating from local schemes
+        # (shroud://) to external origins.  Re-issue the navigation as a
+        # browser-level load so it is not subject to the local-scheme
+        # network restriction.
+        if is_main_frame and self.url().scheme() == "shroud" and url.scheme() in ("http", "https"):
+            QTimer.singleShot(0, lambda u=QUrl(url): self.setUrl(u))
+            return False
+
+        # ── HTTP 401 pre-check ──────────────────────────────────────
+        # Chromium 134 (Qt 6.10) crashes with SIGTRAP on 401 responses.
+        # Probe with a HEAD request from Python before letting Chromium
+        # make the request.  If 401, block navigation and prompt for
+        # credentials; the interceptor will inject the Authorization
+        # header on the retry so Chromium never sees a 401.
+        if is_main_frame and url.scheme() in ("http", "https"):
+            host_lower = (host or "").lower()
+            mw = self._get_main_window()
+            has_auth = (mw and hasattr(mw, "_adblocker")
+                        and host_lower in mw._adblocker._http_auth)
+            if host_lower not in _safe_hosts and not has_auth:
+                if self._probe_for_auth(url.toString()):
+                    # Server requires auth — show dialog, don't let
+                    # Chromium touch this URL yet.
+                    if mw:
+                        QTimer.singleShot(
+                            0, lambda u=QUrl(url): mw._prompt_http_auth(u))
+                    return False
+                # Host doesn't need auth — remember so we skip next time
+                _safe_hosts.add(host_lower)
 
         if self.https_only and url.scheme() == "http" and is_main_frame:
             # Don't upgrade localhost / local network

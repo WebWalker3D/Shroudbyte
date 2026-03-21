@@ -1,5 +1,7 @@
 """Host-based ad/tracker blocker with filter list support and tracking parameter stripping."""
 
+import base64
+
 from PyQt6.QtCore import QUrl, QUrlQuery
 from PyQt6.QtWebEngineCore import QWebEngineUrlRequestInterceptor
 
@@ -162,7 +164,20 @@ class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
         self._blocked_count = 0
         self.do_not_track = True
         self.strip_tracking = True
+        self._http_auth = {}  # host -> b"Basic base64(user:pass)"
         self.reload_hosts()
+
+    def set_http_auth(self, host, user, password):
+        """Cache HTTP Basic auth credentials for a host."""
+        token = base64.b64encode(f"{user}:{password}".encode()).decode()
+        self._http_auth[host.lower()] = f"Basic {token}".encode()
+
+    def clear_http_auth(self, host=None):
+        """Clear cached auth credentials."""
+        if host:
+            self._http_auth.pop(host.lower(), None)
+        else:
+            self._http_auth.clear()
 
     def reload_hosts(self):
         """Merge hardcoded defaults + custom hosts + all enabled filter lists."""
@@ -195,6 +210,11 @@ class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
             info.setHttpHeader(b"DNT", b"1")
 
         url = info.requestUrl()
+
+        # Inject HTTP Basic auth header for protected hosts
+        auth = self._http_auth.get(url.host().lower())
+        if auth:
+            info.setHttpHeader(b"Authorization", auth)
 
         # Strip tracking parameters from URLs
         if self.strip_tracking and url.hasQuery():

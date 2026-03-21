@@ -47,7 +47,14 @@ if _settings.get("custom_dns_enabled") and _settings.get("custom_dns_server") an
 
     _chromium_flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
     _chromium_flags += f" --proxy-server=socks5://127.0.0.1:{_proxy_port}"
-    _chromium_flags += ' --host-resolver-rules="MAP * ~NOTFOUND , EXCLUDE localhost , EXCLUDE 127.0.0.1 , EXCLUDE [::1]"'
+    # Force Chromium to send hostnames (not resolved IPs) to the SOCKS
+    # proxy so that DNS is resolved via authenticated DoH.
+    # Qt WebEngine splits QTWEBENGINE_CHROMIUM_FLAGS on spaces, so the
+    # --host-resolver-rules value cannot contain spaces.  Pass it via
+    # sys.argv where each element is preserved as a single argument.
+    sys.argv.append(
+        "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE localhost , EXCLUDE 127.0.0.1 , EXCLUDE [::1]"
+    )
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _chromium_flags.strip()
 else:
     # Standard Chromium DNS-over-HTTPS
