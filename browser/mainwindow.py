@@ -67,6 +67,7 @@ from .passworddialogs import (
 from .scheme import ShroudSchemeHandler
 from .webview import ShroudWebView
 from .link_intel import LinkResolver
+from .pagewatcher import PageWatcher
 from .privacy_panel import PrivacyPanel
 from . import style
 
@@ -190,6 +191,10 @@ class MainWindow(QMainWindow):
         # Link Intelligence resolver
         self._link_resolver = LinkResolver(self._adblocker._blocked_hosts)
 
+        # Page Watcher
+        self._page_watcher = PageWatcher(self)
+        self._page_watcher.page_changed.connect(self._on_page_watch_changed)
+
         # Early content-blocking script (runs at document creation before page scripts)
         if self._settings.get("enable_adblock", True):
             self._install_content_blocking_script()
@@ -254,6 +259,9 @@ class MainWindow(QMainWindow):
         self._filterlist_timer.timeout.connect(self._auto_update_filterlists)
         self._filterlist_timer.start(24 * 60 * 60 * 1000)
         QTimer.singleShot(5000, self._check_filterlist_freshness)
+
+        # Start page watcher after startup settles
+        QTimer.singleShot(10_000, self._page_watcher.start)
 
         # Handle SIGTERM / SIGINT so session is saved on kill
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -479,6 +487,15 @@ class MainWindow(QMainWindow):
         self._status = QStatusBar()
         self.setStatusBar(self._status)
 
+        self._watch_label = QPushButton()
+        self._watch_label.setFlat(True)
+        self._watch_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._watch_label.clicked.connect(
+            lambda: self.add_new_tab(QUrl("shroud://watches"))
+        )
+        self._status.addPermanentWidget(self._watch_label)
+        self._update_watch_indicator()
+
         self._adblock_label = QPushButton()
         self._adblock_label.setFlat(True)
         self._adblock_label.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -559,6 +576,8 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(self._make_action("Cookie Manager", self._show_cookie_manager))
         tools_menu.addAction(self._make_action("Site Permissions\u2026", self._show_permissions))
         tools_menu.addSeparator()
+        tools_menu.addAction(self._make_action("Page Watches",
+            lambda: self.add_new_tab(QUrl("shroud://watches"))))
         tools_menu.addAction(self._make_action("Clear Browsing Data\u2026", self._show_clear_data))
         tools_menu.addSeparator()
         tools_menu.addAction(self._make_action("Settings", self._show_settings))
@@ -1290,6 +1309,75 @@ class MainWindow(QMainWindow):
             self._delete_cookies_for_domain(arg1)
         elif action == "revoke" and arg1 and arg2:
             storage.remove_permission(arg1, arg2)
+
+    # ------------------------------------------------------------------
+    # Page Watcher
+    # ------------------------------------------------------------------
+
+    def _add_page_watch(self, view):
+        url = view.url().toString()
+        title = view.title() or url
+        interval = self._settings.get("page_watch_interval", 3600)
+        if storage.add_watch(url, title, interval):
+            self._page_watcher.reload_watches()
+            self._status.showMessage(f"Watching: {title[:60]}", 4000)
+            self._update_watch_indicator()
+
+    def _remove_page_watch(self, view):
+        url = view.url().toString()
+        storage.remove_watch(url)
+        self._page_watcher.reload_watches()
+        self._status.showMessage("Stopped watching this page", 4000)
+        self._update_watch_indicator()
+
+    def _on_page_watch_changed(self, watch_data):
+        """Handle a page change detected by the watcher."""
+        from PyQt6.QtWidgets import QSystemTrayIcon
+        if not hasattr(self, "_tray_icon"):
+            self._tray_icon = QSystemTrayIcon(self)
+            self._tray_icon.setVisible(True)
+        title = watch_data.get("title", "")[:60]
+        if self._tray_icon.supportsMessages():
+            self._tray_icon.showMessage(
+                "Page Changed",
+                f"{title} has been updated",
+                QSystemTrayIcon.MessageIcon.Information, 5000,
+            )
+        self._status.showMessage(f"Page changed: {title}", 8000)
+
+    def _handle_watch_action(self, data):
+        """Process actions from the shroud://watches page."""
+        action = data.get("action", "")
+        url = data.get("url", "")
+
+        if action == "remove" and url:
+            storage.remove_watch(url)
+            self._page_watcher.reload_watches()
+        elif action == "toggle" and url:
+            watches = storage.load_watches()
+            for w in watches:
+                if w["url"] == url:
+                    w["enabled"] = not w["enabled"]
+                    break
+            storage.save_watches(watches)
+            self._page_watcher.reload_watches()
+        elif action == "check_now" and url:
+            self._page_watcher.check_now(url)
+        elif action == "set_interval" and url:
+            interval = int(data.get("interval", 3600))
+            storage.update_watch(url, {"interval": interval})
+            self._page_watcher.reload_watches()
+        self._update_watch_indicator()
+
+    def _update_watch_indicator(self):
+        watches = storage.load_watches()
+        active = sum(1 for w in watches if w.get("enabled", True))
+        if active > 0:
+            self._watch_label.setText(f"  {active} watched")
+            self._watch_label.setStyleSheet(style.WATCH_LABEL_STYLE)
+            self._watch_label.setVisible(True)
+        else:
+            self._watch_label.setVisible(False)
 
     # ------------------------------------------------------------------
     # Link Intelligence
@@ -2035,6 +2123,12 @@ class MainWindow(QMainWindow):
             "Resolves redirect chains, detects trackers and URL shorteners."
         )
 
+        watch_interval_spin = QSpinBox()
+        watch_interval_spin.setRange(1, 1440)
+        watch_interval_spin.setSuffix(" min")
+        watch_interval_spin.setValue(self._settings.get("page_watch_interval", 3600) // 60)
+        watch_interval_spin.setToolTip("Default check interval for new page watches")
+
         auto_del_check = QCheckBox("Enabled")
         auto_del_check.setChecked(self._settings.get("auto_delete_cookies", False))
         auto_del_check.setToolTip(
@@ -2068,6 +2162,7 @@ class MainWindow(QMainWindow):
         layout.addRow("Strip Tracking Params", strip_check)
         layout.addRow("Fingerprint Resistance", fp_check)
         layout.addRow("Link Intelligence", link_intel_check)
+        layout.addRow("Page Watch Interval", watch_interval_spin)
         layout.addRow("Auto-Delete Cookies", auto_del_check)
         layout.addRow("DNS-over-HTTPS", doh_combo)
 
@@ -2260,6 +2355,7 @@ class MainWindow(QMainWindow):
             self._settings["strip_tracking"] = strip_check.isChecked()
             self._settings["fingerprint_resistance"] = fp_check.isChecked()
             self._settings["link_intelligence"] = link_intel_check.isChecked()
+            self._settings["page_watch_interval"] = watch_interval_spin.value() * 60
             self._settings["auto_delete_cookies"] = auto_del_check.isChecked()
             self._settings["dns_over_https"] = doh_combo.currentText()
             self._settings["dns_over_https_provider"] = doh_provider_edit.text().strip()
@@ -3363,6 +3459,8 @@ class MainWindow(QMainWindow):
                 storage.save_session(tabs)
             else:
                 storage.clear_session()
+        # Stop page watcher
+        self._page_watcher.stop()
         # Lock the password vault
         self._vault.lock()
 

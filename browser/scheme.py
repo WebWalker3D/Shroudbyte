@@ -34,6 +34,7 @@ def register_shroud_scheme():
 _PAGES = {
     "newtab": "New Tab",
     "privacy": "Privacy Dashboard",
+    "watches": "Page Watches",
     "about": "About Shroudbyte",
     "shortcuts": "Keyboard Shortcuts",
 }
@@ -54,6 +55,8 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
             html = generate_new_tab_html()
         elif host == "privacy":
             html = self._page_privacy()
+        elif host == "watches":
+            html = self._page_watches()
         elif host == "about":
             html = self._page_about()
         elif host == "shortcuts":
@@ -67,6 +70,304 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         job.reply(b"text/html", buf)
 
     # ── Page generators ──────────────────────────────────────────
+
+    def _page_watches(self):
+        """Generate the shroud://watches page watch management page."""
+        import time as _time
+
+        watches = storage.load_watches()
+        active = sum(1 for w in watches if w.get("enabled", True))
+        total_changes = sum(w.get("change_count", 0) for w in watches)
+
+        def _ago(ts):
+            if not ts:
+                return "never"
+            d = _time.time() - ts
+            if d < 60:
+                return "just now"
+            if d < 3600:
+                return f"{int(d / 60)}m ago"
+            if d < 86400:
+                return f"{int(d / 3600)}h ago"
+            return f"{int(d / 86400)}d ago"
+
+        def _interval_label(s):
+            if s < 60:
+                return f"{s}s"
+            if s < 3600:
+                return f"{s // 60}m"
+            return f"{s // 3600}h"
+
+        # ── build watch cards ──
+        cards = ""
+        for w in watches:
+            url = w.get("url", "")
+            title = w.get("title", url)
+            esc_url = html_mod.escape(url)
+            esc_title = html_mod.escape(title[:80])
+            enabled = w.get("enabled", True)
+            interval = w.get("interval", 3600)
+            last_check = _ago(w.get("last_check", 0))
+            last_changed = _ago(w.get("last_changed", 0))
+            changes = w.get("change_count", 0)
+
+            status_dot = "green" if enabled else "dim"
+            toggle_label = "Pause" if enabled else "Resume"
+
+            # Interval selector
+            intervals = [300, 900, 1800, 3600, 7200, 14400, 43200, 86400]
+            options = "".join(
+                f'<option value="{v}"'
+                f'{" selected" if v == interval else ""}>'
+                f'{_interval_label(v)}</option>'
+                for v in intervals
+            )
+            interval_sel = (
+                f'<select class="interval-sel" '
+                f"onchange=\"watchAct('set_interval','{esc_url}',this.value)\">"
+                f'{options}</select>'
+            )
+
+            # Diff section
+            diff_html = ""
+            last_diff = w.get("last_diff", "")
+            if last_diff:
+                diff_lines = ""
+                for line in last_diff.split("\n")[:60]:
+                    esc_line = html_mod.escape(line)
+                    if line.startswith("+") and not line.startswith("+++"):
+                        diff_lines += f'<div class="diff-add">{esc_line}</div>'
+                    elif line.startswith("-") and not line.startswith("---"):
+                        diff_lines += f'<div class="diff-del">{esc_line}</div>'
+                    elif line.startswith("@@"):
+                        diff_lines += f'<div class="diff-hunk">{esc_line}</div>'
+                    else:
+                        diff_lines += f'<div class="diff-ctx">{esc_line}</div>'
+                diff_html = (
+                    f'<details class="diff-box"><summary>View last diff</summary>'
+                    f'<div class="diff-content">{diff_lines}</div></details>'
+                )
+
+            cards += f"""
+    <div class="watch-card">
+      <div class="watch-header">
+        <span class="dot {status_dot}"></span>
+        <span class="watch-title">{esc_title}</span>
+      </div>
+      <div class="watch-url">{esc_url}</div>
+      <div class="watch-meta">
+        Checked {last_check} &middot;
+        Changed {last_changed} &middot;
+        {changes} change{"s" if changes != 1 else ""} &middot;
+        Every {interval_sel}
+      </div>
+      <div class="watch-actions">
+        <button class="act-btn" onclick="watchAct('check_now','{esc_url}')">Check Now</button>
+        <button class="act-btn" onclick="watchAct('toggle','{esc_url}')">{toggle_label}</button>
+        <button class="act-btn danger" onclick="watchAct('remove','{esc_url}')">Remove</button>
+        <a class="act-btn visit" href="{esc_url}" target="_blank">Visit</a>
+      </div>
+      {diff_html}
+    </div>"""
+
+        if not watches:
+            cards = (
+                '<div class="empty">No pages watched yet. '
+                'Right-click any page and choose "Watch This Page".</div>'
+            )
+
+        page_links = "\n      ".join(
+            f'<a href="shroud://{name}">shroud://{name}</a>'
+            for name in _PAGES
+        )
+
+        return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Page Watches &mdash; {__app_name__}</title>
+<style>
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{
+    background: {BG_DARK}; color: {TEXT};
+    font-family: 'Cantarell', 'Noto Sans', system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding-top: 8vh; padding-bottom: 8vh;
+  }}
+  .bg-glow {{
+    position: fixed; top: 14%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 800px; height: 500px;
+    background: radial-gradient(ellipse, rgba(205, 141, 106, 0.04) 0%, transparent 65%);
+    pointer-events: none; z-index: 0;
+  }}
+  .content {{
+    position: relative; z-index: 2;
+    display: flex; flex-direction: column; align-items: center;
+    width: 100%; max-width: 680px; padding: 0 24px;
+  }}
+  .wordmark {{
+    font-size: 28px; font-weight: 700;
+    letter-spacing: 6px; text-transform: uppercase; text-indent: 6px;
+    background: linear-gradient(
+      135deg, {ACCENT_HOVER} 0%, {ACCENT} 35%, {ACCENT_TEXT} 65%, {ACCENT} 100%
+    );
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    margin-bottom: 6px; user-select: none;
+  }}
+  .subtitle {{
+    font-size: 11px; color: {TEXT_FAINT};
+    letter-spacing: 3px; text-transform: uppercase;
+    margin-bottom: 32px;
+  }}
+  .overview {{
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 12px; width: 100%; margin-bottom: 32px;
+  }}
+  .stat-card {{
+    background: {BG_CARD}; border: 1px solid {BORDER};
+    border-radius: 10px; padding: 16px; text-align: center;
+  }}
+  .stat-num {{
+    font-size: 28px; font-weight: 700;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    color: {ACCENT};
+  }}
+  .stat-label {{
+    font-size: 10px; color: {TEXT_FAINT};
+    text-transform: uppercase; letter-spacing: 1px; margin-top: 4px;
+  }}
+  .watch-card {{
+    width: 100%; background: {BG_CARD};
+    border: 1px solid {BORDER}; border-radius: 12px;
+    padding: 16px 20px; margin-bottom: 10px;
+  }}
+  .watch-header {{
+    display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
+  }}
+  .watch-title {{ font-size: 14px; font-weight: 600; color: {TEXT}; }}
+  .watch-url {{
+    font-size: 11px; color: {TEXT_FAINT}; word-break: break-all;
+    font-family: monospace; margin-bottom: 8px;
+  }}
+  .watch-meta {{
+    font-size: 11px; color: {TEXT_DIM}; margin-bottom: 10px;
+    display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  }}
+  .watch-actions {{ display: flex; gap: 6px; flex-wrap: wrap; }}
+  .dot {{
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    flex-shrink: 0;
+  }}
+  .dot.green {{ background: {GREEN}; }}
+  .dot.dim {{ background: {TEXT_FAINT}; }}
+  .act-btn {{
+    padding: 4px 12px; font-size: 11px; font-weight: 500;
+    border: 1px solid {BORDER}; border-radius: 5px;
+    background: {BG_MID}; color: {TEXT_DIM};
+    cursor: pointer; transition: all 0.15s ease;
+    font-family: inherit; text-decoration: none;
+    display: inline-block;
+  }}
+  .act-btn:hover {{
+    background: {ACCENT}; border-color: {ACCENT}; color: {BG_DARK};
+  }}
+  .act-btn.danger {{ border-color: {RED}; color: {RED}; background: transparent; }}
+  .act-btn.danger:hover {{ background: {RED}; color: {BG_DARK}; }}
+  .act-btn.visit {{ border-color: {GREEN}; color: {GREEN}; background: transparent; }}
+  .act-btn.visit:hover {{ background: {GREEN}; color: {BG_DARK}; }}
+  .interval-sel {{
+    padding: 2px 6px; font-size: 11px;
+    background: {BG_DARK}; color: {TEXT_DIM};
+    border: 1px solid {BORDER}; border-radius: 4px;
+    font-family: inherit; cursor: pointer;
+  }}
+  .diff-box {{
+    margin-top: 10px; border-top: 1px solid {BORDER}; padding-top: 8px;
+  }}
+  .diff-box summary {{
+    font-size: 11px; color: {ACCENT}; cursor: pointer;
+    user-select: none;
+  }}
+  .diff-content {{
+    margin-top: 8px; padding: 10px;
+    background: {BG_DARK}; border-radius: 8px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 11px; overflow-x: auto; max-height: 300px; overflow-y: auto;
+  }}
+  .diff-add {{ color: {GREEN}; }}
+  .diff-del {{ color: {RED}; }}
+  .diff-hunk {{ color: {YELLOW}; }}
+  .diff-ctx {{ color: {TEXT_FAINT}; }}
+  .empty {{
+    text-align: center; padding: 40px 20px;
+    color: {TEXT_FAINT}; font-size: 14px;
+  }}
+  .footer {{
+    margin-top: 24px;
+    display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+  }}
+  .footer a {{
+    padding: 8px 16px;
+    background: rgba(28, 27, 36, 0.6);
+    border: 1px solid rgba(40, 38, 51, 0.5);
+    border-radius: 8px; text-decoration: none;
+    color: {ACCENT}; font-size: 13px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    transition: all 0.2s ease;
+  }}
+  .footer a:hover {{
+    background: rgba(38, 36, 48, 0.85);
+    border-color: rgba(205, 141, 106, 0.3);
+    transform: translateY(-1px);
+  }}
+  @keyframes fadeIn {{
+    from {{ opacity: 0; transform: translateY(10px); }}
+    to   {{ opacity: 1; transform: translateY(0); }}
+  }}
+  .wordmark    {{ animation: fadeIn 0.5s ease 0.04s both; }}
+  .subtitle    {{ animation: fadeIn 0.5s ease 0.10s both; }}
+  .overview    {{ animation: fadeIn 0.5s ease 0.18s both; }}
+  .watch-card  {{ animation: fadeIn 0.4s ease 0.26s both; }}
+  .footer      {{ animation: fadeIn 0.5s ease 0.34s both; }}
+</style>
+</head>
+<body>
+  <div class="bg-glow"></div>
+  <div class="content">
+    <div class="wordmark">Watches</div>
+    <div class="subtitle">Page Change Monitor</div>
+
+    <div class="overview">
+      <div class="stat-card">
+        <div class="stat-num">{len(watches)}</div>
+        <div class="stat-label">Total</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">{active}</div>
+        <div class="stat-label">Active</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">{total_changes}</div>
+        <div class="stat-label">Changes</div>
+      </div>
+    </div>
+
+    {cards}
+
+    <div class="footer">
+      {page_links}
+    </div>
+  </div>
+
+  <script>
+    function watchAct(action, url, extra) {{
+      console.log('__SHROUD_WATCH__:' + JSON.stringify({{
+        action: action, url: url || '', interval: extra || ''
+      }}));
+      setTimeout(function() {{ location.reload(); }}, 300);
+    }}
+  </script>
+</body>
+</html>"""
 
     def _page_privacy(self):
         """Generate the shroud://privacy global privacy dashboard."""

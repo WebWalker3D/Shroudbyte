@@ -116,6 +116,7 @@ DEFAULT_SETTINGS = {
     "vault_backend": "master_password",
     "auto_delete_cookies": False,
     "link_intelligence": True,
+    "page_watch_interval": 3600,
 }
 
 
@@ -345,6 +346,53 @@ def remove_site_exception(site_host, tracker_host):
         if not exc[site_host]:
             del exc[site_host]
         save_site_exceptions(exc)
+
+
+# ---------------------------------------------------------------------------
+# Page Watches
+# ---------------------------------------------------------------------------
+
+def load_watches():
+    return _load_json("watches.json", [])
+
+
+def save_watches(watches):
+    _save_json("watches.json", watches)
+
+
+def add_watch(url, title, interval=3600):
+    watches = load_watches()
+    if any(w["url"] == url for w in watches):
+        return False
+    watches.append({
+        "url": url, "title": title, "interval": interval,
+        "enabled": True, "created": time.time(),
+        "last_check": 0, "last_changed": 0,
+        "last_snapshot": "", "last_diff": "",
+        "change_count": 0,
+    })
+    save_watches(watches)
+    return True
+
+
+def remove_watch(url):
+    watches = load_watches()
+    watches = [w for w in watches if w["url"] != url]
+    save_watches(watches)
+
+
+def is_watched(url):
+    return any(w["url"] == url for w in load_watches())
+
+
+def update_watch(url, updates):
+    """Update fields of a specific watch by URL."""
+    watches = load_watches()
+    for w in watches:
+        if w["url"] == url:
+            w.update(updates)
+            break
+    save_watches(watches)
 
 
 # ---------------------------------------------------------------------------

@@ -18,6 +18,7 @@ _CRED_ALERT_PREFIX = "__SHROUD_CRED_CAPTURE__:"
 _PW_FOUND_ALERT = "__SHROUD_PW_FIELDS_FOUND__"
 _LINK_HOVER_PREFIX = "__SHROUD_LINK_HOVER__:"
 _PRIVACY_ACTION_PREFIX = "__SHROUD_PRIVACY__:"
+_WATCH_ACTION_PREFIX = "__SHROUD_WATCH__:"
 
 # Shared set of hosts known NOT to require HTTP auth.
 # Populated on successful HEAD checks; avoids repeat probes.
@@ -80,6 +81,16 @@ class ShroudPage(QWebEnginePage):
                 mw = self._get_main_window()
                 if mw and hasattr(mw, "_handle_privacy_action"):
                     mw._handle_privacy_action(data)
+            except Exception:
+                pass
+            return
+        if message.startswith(_WATCH_ACTION_PREFIX):
+            try:
+                import json as _json
+                data = _json.loads(message[len(_WATCH_ACTION_PREFIX):])
+                mw = self._get_main_window()
+                if mw and hasattr(mw, "_handle_watch_action"):
+                    mw._handle_watch_action(data)
             except Exception:
                 pass
             return
@@ -323,6 +334,18 @@ class ShroudWebView(QWebEngineView):
         view_source = menu.addAction("View Page Source")
         view_source.triggered.connect(lambda: self._view_source())
 
+        # Watch page action
+        current_url = self.url().toString()
+        if current_url and not current_url.startswith("shroud:"):
+            from . import storage as _st
+            menu.addSeparator()
+            if _st.is_watched(current_url):
+                watch_act = menu.addAction("Stop Watching This Page")
+                watch_act.triggered.connect(lambda: self._stop_watching())
+            else:
+                watch_act = menu.addAction("Watch This Page")
+                watch_act.triggered.connect(lambda: self._start_watching())
+
         menu.exec(event.globalPos())
 
     def _open_in_new_tab(self, url):
@@ -353,6 +376,14 @@ class ShroudWebView(QWebEngineView):
         })()
         """
         self.page().runJavaScript(js)
+
+    def _start_watching(self):
+        if self._tab_widget and hasattr(self._tab_widget, "_add_page_watch"):
+            self._tab_widget._add_page_watch(self)
+
+    def _stop_watching(self):
+        if self._tab_widget and hasattr(self._tab_widget, "_remove_page_watch"):
+            self._tab_widget._remove_page_watch(self)
 
     def _view_source(self):
         if self._tab_widget and hasattr(self._tab_widget, "_view_source"):

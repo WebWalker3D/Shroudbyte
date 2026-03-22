@@ -423,6 +423,12 @@ SETTINGS_FORM_STYLE = f"""
     QDialogButtonBox {{ button-layout: 0; }}
 """
 
+WATCH_LABEL_STYLE = (
+    f"QPushButton {{ color: {ACCENT_TEXT}; font-size: 11px; padding: 0 8px; "
+    f"border: none; background: transparent; }}"
+    f"QPushButton:hover {{ color: {TEXT}; }}"
+)
+
 ADBLOCK_LABEL_ON_STYLE = (
     f"QPushButton {{ color: {GREEN}; font-size: 11px; padding: 0 8px; "
     f"border: none; background: transparent; }}"
