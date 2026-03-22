@@ -161,6 +161,8 @@ def download_all_enabled(callback=None) -> dict:
     for fl in FILTER_LISTS:
         if settings.get(fl["id"], False):
             ok = download_list(fl["id"])
+            if ok:
+                invalidate_parse_cache(fl["id"])
             results[fl["id"]] = ok
             if callback:
                 callback(fl["id"], ok)
@@ -224,6 +226,33 @@ def _parse_file(text: str) -> tuple[set, list]:
     return domains, cosmetic
 
 
+_parse_cache: dict[str, tuple[set, list]] = {}  # list_id -> (domains, cosmetic)
+
+
+def _get_parsed(list_id: str) -> tuple[set, list]:
+    """Return cached parse result for a list, parsing on first access."""
+    if list_id in _parse_cache:
+        return _parse_cache[list_id]
+    path = get_cached_path(list_id)
+    if not path.exists():
+        return set(), []
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        result = _parse_file(text)
+        _parse_cache[list_id] = result
+        return result
+    except Exception:
+        return set(), []
+
+
+def invalidate_parse_cache(list_id: str = ""):
+    """Clear cached parse results. Call after downloading new lists."""
+    if list_id:
+        _parse_cache.pop(list_id, None)
+    else:
+        _parse_cache.clear()
+
+
 def get_all_blocked_hosts() -> set:
     """Return the merged set of blocked domains from all enabled, cached lists."""
     settings = load_list_settings()
@@ -231,15 +260,8 @@ def get_all_blocked_hosts() -> set:
     for fl in FILTER_LISTS:
         if not settings.get(fl["id"], False):
             continue
-        path = get_cached_path(fl["id"])
-        if not path.exists():
-            continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-            domains, _ = _parse_file(text)
-            all_domains |= domains
-        except Exception:
-            continue
+        domains, _ = _get_parsed(fl["id"])
+        all_domains |= domains
     return all_domains
 
 
@@ -252,15 +274,8 @@ def get_cosmetic_rules() -> list:
     for fl in FILTER_LISTS:
         if not settings.get(fl["id"], False):
             continue
-        path = get_cached_path(fl["id"])
-        if not path.exists():
-            continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-            _, cosmetic = _parse_file(text)
-            all_selectors.extend(cosmetic)
-        except Exception:
-            continue
+        _, cosmetic = _get_parsed(fl["id"])
+        all_selectors.extend(cosmetic)
     # Deduplicate while preserving order
     seen = set()
     unique = []

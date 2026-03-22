@@ -218,11 +218,16 @@ class MainWindow(QMainWindow):
         self._adblocker.do_not_track = self._settings.get("do_not_track", True)
         self._adblocker.strip_tracking = self._settings.get("strip_tracking", True)
 
-        # Cache cosmetic CSS for injection
-        self._cosmetic_css = filterlists.get_cosmetic_css()
+        # Defer heavy filter list parsing until after the window is visible.
+        # The hardcoded defaults protect during the brief loading window.
+        self._cosmetic_css = ""
 
         # Session restore or new tab
         self._restore_session_or_new_tab()
+
+        # Load filter lists in background after the UI is up
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(0, self._deferred_filter_load)
 
         # Autosave session every 30 seconds so data survives crashes
         from PyQt6.QtCore import QTimer
@@ -245,6 +250,26 @@ class MainWindow(QMainWindow):
         self._autosave_session()
         self._vault.lock()
         QApplication.quit()
+
+    def _deferred_filter_load(self):
+        """Load filter lists in a thread after the window is visible."""
+        import threading
+
+        def _load():
+            filterlists.get_all_blocked_hosts()
+            filterlists.get_cosmetic_css()
+
+        def _apply():
+            self._adblocker.reload_hosts()
+            self._cosmetic_css = filterlists.get_cosmetic_css()
+            self._update_adblock_label()
+
+        def _worker():
+            _load()
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, _apply)
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _autosave_session(self):
         """Periodically save the current session to disk."""

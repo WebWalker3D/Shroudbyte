@@ -49,7 +49,7 @@ class ShroudPage(QWebEnginePage):
         try:
             req = urllib.request.Request(url_string, method="HEAD")
             ctx = ssl.create_default_context()
-            urllib.request.urlopen(req, timeout=3, context=ctx)
+            urllib.request.urlopen(req, timeout=1.5, context=ctx)
             return False
         except urllib.error.HTTPError as e:
             return e.code == 401
