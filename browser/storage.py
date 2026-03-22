@@ -112,6 +112,7 @@ DEFAULT_SETTINGS = {
     "custom_dns_secret": "",
     "custom_dns_fallback": True,
     "custom_dns_cert_fingerprint": "",
+    "filterlist_last_update": 0,
 }
 
 
@@ -164,6 +165,47 @@ def clear_session():
     path = DATA_DIR / "session.json"
     if path.exists():
         path.unlink()
+
+
+# ---------------------------------------------------------------------------
+# Site permissions
+# ---------------------------------------------------------------------------
+
+def load_permissions():
+    """Load per-site permission decisions."""
+    return _load_json("permissions.json", {})
+
+
+def save_permissions(permissions):
+    _save_json("permissions.json", permissions)
+
+
+def get_permission(host, feature):
+    """Get stored permission for host+feature. Returns 'allow', 'deny', or None."""
+    perms = load_permissions()
+    return perms.get(host, {}).get(feature)
+
+
+def set_permission(host, feature, decision):
+    """Store a permission decision ('allow' or 'deny') for host+feature."""
+    perms = load_permissions()
+    if host not in perms:
+        perms[host] = {}
+    perms[host][feature] = decision
+    save_permissions(perms)
+
+
+def remove_permission(host, feature=None):
+    """Remove permission(s) for a host. If feature is None, remove all for that host."""
+    perms = load_permissions()
+    if host in perms:
+        if feature:
+            perms[host].pop(feature, None)
+            if not perms[host]:
+                del perms[host]
+        else:
+            del perms[host]
+        save_permissions(perms)
 
 
 # ---------------------------------------------------------------------------

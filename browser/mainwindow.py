@@ -1,7 +1,9 @@
 """Main browser window with tabbed browsing, navigation, bookmarks, and history."""
 
+import html as html_mod
 import json
 import os
+import re
 import signal
 import time
 from functools import partial
@@ -215,6 +217,12 @@ class MainWindow(QMainWindow):
         self._session_timer.timeout.connect(self._autosave_session)
         self._session_timer.start(30_000)
 
+        # Auto-update filter lists every 24 hours
+        self._filterlist_timer = QTimer(self)
+        self._filterlist_timer.timeout.connect(self._auto_update_filterlists)
+        self._filterlist_timer.start(24 * 60 * 60 * 1000)
+        QTimer.singleShot(5000, self._check_filterlist_freshness)
+
         # Handle SIGTERM / SIGINT so session is saved on kill
         signal.signal(signal.SIGTERM, self._signal_handler)
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -237,7 +245,10 @@ class MainWindow(QMainWindow):
                 url = deferred or view.url().toString()
                 title = view.title() or self._tabs.tabText(i)
                 if url and not url.startswith("shroud:"):
-                    tabs.append({"url": url, "title": title})
+                    tabs.append({
+                        "url": url, "title": title,
+                        "pinned": getattr(view, '_pinned', False),
+                    })
         if tabs:
             storage.save_session(tabs)
 
@@ -302,6 +313,13 @@ class MainWindow(QMainWindow):
         self._home_btn.setStyleSheet(style.NAV_BTN_STYLE)
         self._home_btn.clicked.connect(self._go_home)
 
+        # Security indicator
+        self._security_icon = QLabel()
+        self._security_icon.setFixedSize(24, 24)
+        self._security_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._security_icon.setToolTip("Connection security")
+        self._security_icon.setStyleSheet(f"color: {style.TEXT_FAINT}; font-size: 14px; padding: 0;")
+
         # URL bar
         self._url_bar = QLineEdit()
         self._url_bar.setPlaceholderText("Search or enter URL\u2026")
@@ -348,8 +366,8 @@ class MainWindow(QMainWindow):
 
         for w in [
             self._back_btn, self._forward_btn, self._reload_btn,
-            self._home_btn, self._url_bar, self._bookmark_btn,
-            self._reader_btn, self._new_tab_btn,
+            self._home_btn, self._security_icon, self._url_bar,
+            self._bookmark_btn, self._reader_btn, self._new_tab_btn,
         ]:
             self._navbar.addWidget(w)
 
@@ -443,11 +461,16 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self._make_action("Reader Mode", self._toggle_reader_mode, "F9"))
         view_menu.addSeparator()
         view_menu.addAction(self._make_action("View Source", self._view_source, "Ctrl+U"))
+        view_menu.addSeparator()
+        view_menu.addAction(self._make_action("Picture in Picture", self._toggle_pip))
 
         # Bookmarks menu
         bm_menu = menubar.addMenu("&Bookmarks")
         bm_menu.addAction(self._make_action("Bookmark This Page", self._toggle_bookmark, "Ctrl+D"))
         bm_menu.addAction(self._make_action("Show All Bookmarks", self._show_bookmarks, "Ctrl+Shift+B"))
+        bm_menu.addSeparator()
+        bm_menu.addAction(self._make_action("Import Bookmarks\u2026", self._import_bookmarks))
+        bm_menu.addAction(self._make_action("Export Bookmarks\u2026", self._export_bookmarks))
         bm_menu.addSeparator()
         self._bookmarks_menu = bm_menu
         self._populate_bookmarks_menu()
@@ -466,6 +489,10 @@ class MainWindow(QMainWindow):
         tools_menu.addSeparator()
         tools_menu.addAction(self._make_action("Downloads", self._show_downloads, "Ctrl+J"))
         tools_menu.addAction(self._make_action("Developer Tools", self._open_devtools, "F12"))
+        tools_menu.addAction(self._make_action("Screenshot\u2026", self._take_screenshot, "Ctrl+Shift+E"))
+        tools_menu.addSeparator()
+        tools_menu.addAction(self._make_action("Cookie Manager", self._show_cookie_manager))
+        tools_menu.addAction(self._make_action("Site Permissions\u2026", self._show_permissions))
         tools_menu.addSeparator()
         tools_menu.addAction(self._make_action("Clear Browsing Data\u2026", self._show_clear_data))
         tools_menu.addSeparator()
@@ -473,6 +500,9 @@ class MainWindow(QMainWindow):
 
         # Help menu
         help_menu = menubar.addMenu("&Help")
+        help_menu.addAction(self._make_action(
+            "Keyboard Shortcuts", lambda: self._current_view().load(QUrl("shroud://shortcuts")), "F1"))
+        help_menu.addSeparator()
         help_menu.addAction(self._make_action("About", self._show_about))
 
     def _setup_shortcuts(self):
@@ -528,15 +558,65 @@ class MainWindow(QMainWindow):
             return
 
         menu = QMenu(self)
+
+        view = self._tabs.widget(index)
+        if getattr(view, '_pinned', False):
+            menu.addAction("Unpin Tab", lambda: self._unpin_tab(index))
+        else:
+            menu.addAction("Pin Tab", lambda: self._pin_tab(index))
+
+        if getattr(view, '_muted', False):
+            menu.addAction("Unmute Tab", lambda: self._toggle_tab_mute(index))
+        else:
+            menu.addAction("Mute Tab", lambda: self._toggle_tab_mute(index))
+
         menu.addAction("Detach Tab", lambda: self._detach_tab(index))
         menu.addSeparator()
         menu.addAction("Close Tab", lambda: self._close_tab(index))
         menu.addAction("Close Other Tabs", lambda: self._close_other_tabs(index))
         menu.exec(self._tabs.tabBar().mapToGlobal(pos))
 
+    # ------------------------------------------------------------------
+    # Tab pinning
+    # ------------------------------------------------------------------
+
+    def _pin_tab(self, index):
+        """Pin a tab: shrink it to icon-only, move to the left, remove close button."""
+        view = self._tabs.widget(index)
+        if not view or getattr(view, '_pinned', False):
+            return
+        view._pinned = True
+        pinned_count = sum(1 for i in range(self._tabs.count())
+                          if getattr(self._tabs.widget(i), '_pinned', False) and i != index)
+        if index != pinned_count:
+            self._tabs.tabBar().moveTab(index, pinned_count)
+        bar = self._tabs.tabBar()
+        bar.setTabButton(pinned_count, QTabBar.ButtonPosition.RightSide, None)
+        bar.setTabButton(pinned_count, QTabBar.ButtonPosition.LeftSide, None)
+        self._tabs.setTabText(pinned_count, "")
+        self._tabs.setTabToolTip(pinned_count, view.title() or view.url().toString())
+
+    def _unpin_tab(self, index):
+        """Unpin a tab: restore title, move after all pinned tabs."""
+        view = self._tabs.widget(index)
+        if not view or not getattr(view, '_pinned', False):
+            return
+        view._pinned = False
+        title = view.title() or "Tab"
+        display = title[:30] + "\u2026" if len(title) > 30 else title
+        self._tabs.setTabText(index, display)
+        self._tabs.setTabToolTip(index, title)
+        pinned_count = sum(1 for i in range(self._tabs.count())
+                          if getattr(self._tabs.widget(i), '_pinned', False))
+        if index < pinned_count:
+            self._tabs.tabBar().moveTab(index, pinned_count)
+
     def _detach_tab(self, index):
         """Detach a tab into its own floating window, preserving the live view."""
         if self._tabs.count() <= 1:
+            return
+        widget = self._tabs.widget(index)
+        if widget and getattr(widget, '_pinned', False):
             return
 
         title = self._tabs.tabText(index)
@@ -565,9 +645,12 @@ class MainWindow(QMainWindow):
                               if win in self._detached_windows else None)
 
     def _close_other_tabs(self, keep_index):
-        """Close all tabs except the one at keep_index."""
+        """Close all tabs except the one at keep_index (and pinned tabs)."""
         for i in range(self._tabs.count() - 1, -1, -1):
             if i != keep_index:
+                w = self._tabs.widget(i)
+                if w and getattr(w, '_pinned', False):
+                    continue
                 self._close_tab(i)
 
     # ------------------------------------------------------------------
@@ -589,6 +672,7 @@ class MainWindow(QMainWindow):
         view.loadProgress.connect(self._load_progress)
         view.loadFinished.connect(self._load_finished)
         view.page().fullScreenRequested.connect(self._handle_fullscreen_request)
+        view.page().recentlyAudibleChanged.connect(partial(self._tab_audio_changed, view))
 
         if url is None:
             view.load(QUrl("shroud://newtab"))
@@ -600,10 +684,12 @@ class MainWindow(QMainWindow):
         return view
 
     def _close_tab(self, index):
+        widget = self._tabs.widget(index)
+        if widget and getattr(widget, '_pinned', False):
+            return
         if self._tabs.count() <= 1:
             self.close()
             return
-        widget = self._tabs.widget(index)
         # Save to closed tabs stack for Ctrl+Shift+T
         url = widget.url().toString()
         title = widget.title()
@@ -638,9 +724,17 @@ class MainWindow(QMainWindow):
     def _tab_title_changed(self, view, title):
         index = self._tabs.indexOf(view)
         if index >= 0:
-            display = title[:30] + "\u2026" if len(title) > 30 else title
-            self._tabs.setTabText(index, display)
-            self._tabs.setTabToolTip(index, title)
+            if getattr(view, '_pinned', False):
+                self._tabs.setTabText(index, "")
+                self._tabs.setTabToolTip(index, title)
+            else:
+                display = title[:30] + "\u2026" if len(title) > 30 else title
+                if getattr(view, '_muted', False):
+                    display = "\U0001f507 " + display
+                elif view.page().recentlyAudible():
+                    display = "\U0001f50a " + display
+                self._tabs.setTabText(index, display)
+                self._tabs.setTabToolTip(index, title)
         if view == self._current_view():
             self._update_title(title)
 
@@ -650,6 +744,33 @@ class MainWindow(QMainWindow):
             if url and not url.startswith("shroud:"):
                 storage.add_history_entry(title, url)
                 self._refresh_suggestions()
+
+    def _tab_audio_changed(self, view, audible):
+        """Update tab text with audio indicator."""
+        index = self._tabs.indexOf(view)
+        if index < 0:
+            return
+        if getattr(view, '_pinned', False):
+            prefix = "\U0001f507 " if getattr(view, '_muted', False) else ("\U0001f50a " if audible else "")
+            self._tabs.setTabToolTip(index, prefix + (view.title() or view.url().toString()))
+            return
+        title = view.title() or "Tab"
+        display = title[:30] + "\u2026" if len(title) > 30 else title
+        if getattr(view, '_muted', False):
+            display = "\U0001f507 " + display
+        elif audible:
+            display = "\U0001f50a " + display
+        self._tabs.setTabText(index, display)
+
+    def _toggle_tab_mute(self, index):
+        """Toggle mute state for the tab at the given index."""
+        view = self._tabs.widget(index)
+        if not view:
+            return
+        muted = not getattr(view, '_muted', False)
+        view._muted = muted
+        view.page().setAudioMuted(muted)
+        self._tab_audio_changed(view, view.page().recentlyAudible())
 
     def _tab_icon_changed(self, view, icon):
         index = self._tabs.indexOf(view)
@@ -763,6 +884,29 @@ class MainWindow(QMainWindow):
         else:
             self._url_bar.setText(url.toString())
             self._url_bar.setCursorPosition(0)
+        self._update_security_icon(url)
+
+    def _update_security_icon(self, url):
+        scheme = url.scheme()
+        if scheme == "https":
+            self._security_icon.setText("\U0001f512")
+            self._security_icon.setToolTip("Secure connection (HTTPS)")
+            self._security_icon.setStyleSheet(f"color: {style.GREEN}; font-size: 14px; padding: 0;")
+        elif scheme == "http":
+            self._security_icon.setText("\u26a0")
+            self._security_icon.setToolTip("Not secure (HTTP)")
+            self._security_icon.setStyleSheet(f"color: {style.YELLOW}; font-size: 14px; padding: 0;")
+        elif scheme == "shroud":
+            self._security_icon.setText("\U0001f6e1")
+            self._security_icon.setToolTip("Internal page")
+            self._security_icon.setStyleSheet(f"color: {style.ACCENT}; font-size: 14px; padding: 0;")
+        elif scheme == "file":
+            self._security_icon.setText("\U0001f4c1")
+            self._security_icon.setToolTip("Local file")
+            self._security_icon.setStyleSheet(f"color: {style.TEXT_DIM}; font-size: 14px; padding: 0;")
+        else:
+            self._security_icon.setText("")
+            self._security_icon.setToolTip("")
 
     def _update_title(self, title):
         suffix = "  [Private]" if self._private_mode else ""
@@ -1009,7 +1153,7 @@ class MainWindow(QMainWindow):
 
     def _populate_bookmarks_menu(self):
         actions = self._bookmarks_menu.actions()
-        for a in actions[3:]:
+        for a in actions[6:]:
             self._bookmarks_menu.removeAction(a)
 
         for bm in storage.load_bookmarks()[:20]:
@@ -2037,6 +2181,344 @@ class MainWindow(QMainWindow):
         )
 
     # ------------------------------------------------------------------
+    # Screenshot
+    # ------------------------------------------------------------------
+
+    def _take_screenshot(self):
+        view = self._current_view()
+        if not view:
+            return
+        pixmap = view.grab()
+        title = view.title() or "screenshot"
+        safe = "".join(c if c.isalnum() or c in " _-" else "_" for c in title)
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Screenshot", f"{safe}.png",
+            "PNG images (*.png);;JPEG images (*.jpg);;All files (*)")
+        if path:
+            pixmap.save(path)
+            self._status.showMessage(f"Screenshot saved to {path}", 4000)
+
+    # ------------------------------------------------------------------
+    # Picture in Picture
+    # ------------------------------------------------------------------
+
+    def _toggle_pip(self):
+        view = self._current_view()
+        if view:
+            view.page().runJavaScript("""
+            (function() {
+                var video = document.querySelector('video');
+                if (!video) return false;
+                if (document.pictureInPictureElement) {
+                    document.exitPictureInPicture();
+                } else {
+                    video.requestPictureInPicture();
+                }
+                return true;
+            })()
+            """)
+
+    # ------------------------------------------------------------------
+    # Bookmark import / export
+    # ------------------------------------------------------------------
+
+    def _export_bookmarks(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Bookmarks", "bookmarks.html", "HTML files (*.html)")
+        if not path:
+            return
+        bookmarks = storage.load_bookmarks()
+        lines = [
+            '<!DOCTYPE NETSCAPE-Bookmark-file-1>',
+            '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">',
+            '<TITLE>Bookmarks</TITLE>',
+            '<H1>Bookmarks</H1>',
+            '<DL><p>',
+        ]
+        for bm in bookmarks:
+            ts = int(bm.get("added", time.time()))
+            title = html_mod.escape(bm["title"])
+            url = html_mod.escape(bm["url"])
+            lines.append(f'    <DT><A HREF="{url}" ADD_DATE="{ts}">{title}</A>')
+        lines.append('</DL><p>')
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines))
+        self._status.showMessage(f"Exported {len(bookmarks)} bookmarks", 3000)
+
+    def _import_bookmarks(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import Bookmarks", "", "HTML files (*.html);;All files (*)")
+        if not path:
+            return
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+        pattern = r'<A\s+HREF="([^"]+)"[^>]*>([^<]*)</A>'
+        matches = re.findall(pattern, content, re.IGNORECASE)
+        count = 0
+        for url, title in matches:
+            title = html_mod.unescape(title.strip())
+            url = html_mod.unescape(url.strip())
+            if url and storage.add_bookmark(title or url, url):
+                count += 1
+        self._populate_bookmarks_menu()
+        self._update_bookmark_btn(self._current_view().url())
+        self._status.showMessage(f"Imported {count} new bookmarks", 3000)
+
+    # ------------------------------------------------------------------
+    # Filter list auto-update
+    # ------------------------------------------------------------------
+
+    def _check_filterlist_freshness(self):
+        if not self._settings.get("enable_adblock", True):
+            return
+        last_update = self._settings.get("filterlist_last_update", 0)
+        if time.time() - last_update > 24 * 3600:
+            self._auto_update_filterlists()
+
+    def _auto_update_filterlists(self):
+        if not self._settings.get("enable_adblock", True):
+            return
+        try:
+            filterlists.download_all_enabled()
+            self._adblocker.reload_hosts()
+            self._cosmetic_css = filterlists.get_cosmetic_css()
+            self._settings["filterlist_last_update"] = time.time()
+            storage.save_settings(self._settings)
+            self._update_adblock_label()
+            self._status.showMessage("Filter lists updated", 3000)
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # Cookie manager
+    # ------------------------------------------------------------------
+
+    def _show_cookie_manager(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Cookie Manager")
+        dialog.setMinimumSize(620, 500)
+        dialog.setStyleSheet(style.SETTINGS_FORM_STYLE)
+
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        search = QLineEdit()
+        search.setPlaceholderText("  Filter by domain...")
+        search.setStyleSheet(style.SEARCH_INPUT_STYLE)
+        layout.addWidget(search)
+
+        count_label = QLabel("Loading cookies...")
+        count_label.setStyleSheet(f"color: {style.TEXT_DIM}; font-size: 12px;")
+        layout.addWidget(count_label)
+
+        listw = QListWidget()
+        listw.setStyleSheet(style.LIST_WIDGET_STYLE)
+        layout.addWidget(listw)
+
+        cookies = []
+        cookie_store = self._profile.cookieStore()
+
+        def on_cookie(cookie):
+            cookies.append(cookie)
+
+        def populate(filter_text=""):
+            listw.clear()
+            ft = filter_text.lower()
+            domains = {}
+            for c in cookies:
+                domain = c.domain()
+                if ft and ft not in domain.lower():
+                    continue
+                if domain not in domains:
+                    domains[domain] = []
+                domains[domain].append(c)
+            count_label.setText(
+                f"{len(cookies)} cookies from {len(domains)} domains"
+                if not ft else f"Showing {sum(len(v) for v in domains.values())} cookies")
+            for domain in sorted(domains.keys()):
+                for c in domains[domain]:
+                    name = c.name().data().decode('utf-8', errors='replace')
+                    item = QListWidgetItem(f"{domain}  \u2014  {name}")
+                    item.setData(Qt.ItemDataRole.UserRole, c)
+                    listw.addItem(item)
+
+        cookie_store.cookieAdded.connect(on_cookie)
+        cookie_store.loadAllCookies()
+
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(500, lambda: populate())
+        search.textChanged.connect(populate)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(8)
+
+        delete_btn = QPushButton("Delete Selected")
+        delete_btn.setStyleSheet(style.DIALOG_BTN_DANGER_STYLE)
+        delete_all_btn = QPushButton("Delete All")
+        delete_all_btn.setStyleSheet(style.DIALOG_BTN_DANGER_STYLE)
+        close_btn = QPushButton("Close")
+        close_btn.setStyleSheet(style.DIALOG_BTN_STYLE)
+
+        def delete_selected():
+            item = listw.currentItem()
+            if item:
+                cookie = item.data(Qt.ItemDataRole.UserRole)
+                cookie_store.deleteCookie(cookie)
+                if cookie in cookies:
+                    cookies.remove(cookie)
+                listw.takeItem(listw.row(item))
+                populate(search.text())
+
+        def delete_all():
+            reply = QMessageBox.question(
+                dialog, "Delete All Cookies",
+                "Delete all cookies? You will be logged out of all sites.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.Yes:
+                cookie_store.deleteAllCookies()
+                cookies.clear()
+                populate(search.text())
+
+        delete_btn.clicked.connect(delete_selected)
+        delete_all_btn.clicked.connect(delete_all)
+        close_btn.clicked.connect(dialog.close)
+
+        btn_layout.addWidget(delete_btn)
+        btn_layout.addWidget(delete_all_btn)
+        btn_layout.addStretch()
+        btn_layout.addWidget(close_btn)
+        layout.addLayout(btn_layout)
+
+        def cleanup():
+            try:
+                cookie_store.cookieAdded.disconnect(on_cookie)
+            except Exception:
+                pass
+
+        dialog.finished.connect(cleanup)
+        dialog.exec()
+
+    # ------------------------------------------------------------------
+    # Site permissions
+    # ------------------------------------------------------------------
+
+    def _show_permission_prompt(self, origin, feature, feature_name, host):
+        descriptions = {
+            "geolocation": "access your location",
+            "microphone": "use your microphone",
+            "camera": "use your camera",
+            "camera_microphone": "use your camera and microphone",
+            "notifications": "show notifications",
+            "screen_share": "share your screen",
+            "screen_share_audio": "share your screen with audio",
+        }
+        desc = descriptions.get(feature_name, f"use {feature_name}")
+
+        bar = QFrame()
+        bar.setStyleSheet(f"""
+            QFrame {{
+                background: {style.BG_CARD};
+                border-bottom: 1px solid {style.BORDER};
+                padding: 8px 14px;
+            }}
+            QLabel {{ color: {style.TEXT}; font-size: 13px; }}
+        """)
+        bar_layout = QHBoxLayout(bar)
+        bar_layout.setContentsMargins(12, 6, 12, 6)
+
+        label = QLabel(f"\U0001f6e1  {host} wants to {desc}")
+        allow_btn = QPushButton("Allow")
+        allow_btn.setStyleSheet(style.DIALOG_BTN_PRIMARY_STYLE)
+        deny_btn = QPushButton("Deny")
+        deny_btn.setStyleSheet(style.DIALOG_BTN_STYLE)
+        remember_check = QCheckBox("Remember")
+        remember_check.setChecked(True)
+        remember_check.setStyleSheet(f"color: {style.TEXT_DIM}; font-size: 12px;")
+
+        bar_layout.addWidget(label)
+        bar_layout.addStretch()
+        bar_layout.addWidget(remember_check)
+        bar_layout.addWidget(deny_btn)
+        bar_layout.addWidget(allow_btn)
+
+        view = self._current_view()
+
+        def respond(allowed):
+            policy = (QWebEnginePage.PermissionPolicy.PermissionGrantedByUser if allowed
+                      else QWebEnginePage.PermissionPolicy.PermissionDeniedByUser)
+            if view:
+                view.page().setFeaturePermission(origin, feature, policy)
+            if remember_check.isChecked():
+                storage.set_permission(host, feature_name, "allow" if allowed else "deny")
+            bar.setParent(None)
+            bar.deleteLater()
+
+        allow_btn.clicked.connect(lambda: respond(True))
+        deny_btn.clicked.connect(lambda: respond(False))
+
+        self._central_layout.insertWidget(0, bar)
+
+    def _show_permissions(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Site Permissions")
+        dialog.setMinimumSize(560, 440)
+        dialog.setStyleSheet(style.SETTINGS_FORM_STYLE)
+
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        listw = QListWidget()
+        listw.setStyleSheet(style.LIST_WIDGET_STYLE)
+
+        perms = storage.load_permissions()
+        for host, features in sorted(perms.items()):
+            for feat, decision in sorted(features.items()):
+                icon = "\u2705" if decision == "allow" else "\u274c"
+                item = QListWidgetItem(f"{icon}  {host}  \u2014  {feat}  ({decision})")
+                item.setData(Qt.ItemDataRole.UserRole, (host, feat))
+                listw.addItem(item)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(8)
+
+        delete_btn = QPushButton("Remove Selected")
+        delete_btn.setStyleSheet(style.DIALOG_BTN_DANGER_STYLE)
+        clear_btn = QPushButton("Remove All")
+        clear_btn.setStyleSheet(style.DIALOG_BTN_DANGER_STYLE)
+        close_btn = QPushButton("Close")
+        close_btn.setStyleSheet(style.DIALOG_BTN_STYLE)
+
+        def delete_selected():
+            item = listw.currentItem()
+            if item:
+                h, f = item.data(Qt.ItemDataRole.UserRole)
+                storage.remove_permission(h, f)
+                listw.takeItem(listw.row(item))
+
+        def clear_all():
+            reply = QMessageBox.question(dialog, "Remove All Permissions",
+                "Remove all saved site permissions?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.Yes:
+                storage.save_permissions({})
+                listw.clear()
+
+        delete_btn.clicked.connect(delete_selected)
+        clear_btn.clicked.connect(clear_all)
+        close_btn.clicked.connect(dialog.close)
+
+        btn_layout.addWidget(delete_btn)
+        btn_layout.addWidget(clear_btn)
+        btn_layout.addStretch()
+        btn_layout.addWidget(close_btn)
+
+        layout.addWidget(listw)
+        layout.addLayout(btn_layout)
+        dialog.exec()
+
+    # ------------------------------------------------------------------
     # Session save / restore
     # ------------------------------------------------------------------
 
@@ -2045,16 +2527,20 @@ class MainWindow(QMainWindow):
         if self._settings.get("restore_session", True) and not self._private_mode:
             session = storage.load_session()
             if session:
+                pinned_indices = []
                 for i, tab_info in enumerate(session):
                     url = tab_info.get("url", "")
                     title = tab_info.get("title", "")
                     if url and not url.startswith("shroud:"):
                         if i == 0:
-                            # Load the first tab immediately
                             self.add_new_tab(url)
                         else:
-                            # Lazy load: create tab but don't load URL yet
                             self._add_lazy_tab(url, title)
+                        if tab_info.get("pinned", False):
+                            pinned_indices.append(self._tabs.count() - 1)
+                # Restore pinned state
+                for idx in pinned_indices:
+                    self._pin_tab(idx)
                 if self._tabs.count() > 0:
                     return
         self.add_new_tab()
@@ -2077,6 +2563,7 @@ class MainWindow(QMainWindow):
         view.loadProgress.connect(self._load_progress)
         view.loadFinished.connect(self._load_finished)
         view.page().fullScreenRequested.connect(self._handle_fullscreen_request)
+        view.page().recentlyAudibleChanged.connect(partial(self._tab_audio_changed, view))
 
         # Show placeholder
         view.setHtml(
@@ -2102,7 +2589,10 @@ class MainWindow(QMainWindow):
                     url = deferred or view.url().toString()
                     title = view.title() or self._tabs.tabText(i)
                     if url and not url.startswith("shroud:"):
-                        tabs.append({"url": url, "title": title})
+                        tabs.append({
+                            "url": url, "title": title,
+                            "pinned": getattr(view, '_pinned', False),
+                        })
             if tabs:
                 storage.save_session(tabs)
             else:

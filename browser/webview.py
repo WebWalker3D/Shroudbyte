@@ -26,6 +26,7 @@ class ShroudPage(QWebEnginePage):
         super().__init__(profile, parent)
         self._view_ref = None
         self.https_only = False
+        self.featurePermissionRequested.connect(self._on_permission_requested)
 
     def createWindow(self, window_type):
         view = self._view_ref
@@ -61,6 +62,40 @@ class ShroudPage(QWebEnginePage):
         if view and hasattr(view, "_tab_widget"):
             return view._tab_widget
         return None
+
+    def _on_permission_requested(self, origin, feature):
+        """Handle permission requests from web pages."""
+        from . import storage
+
+        host = origin.host()
+
+        feature_names = {
+            QWebEnginePage.Feature.Geolocation: "geolocation",
+            QWebEnginePage.Feature.MediaAudioCapture: "microphone",
+            QWebEnginePage.Feature.MediaVideoCapture: "camera",
+            QWebEnginePage.Feature.MediaAudioVideoCapture: "camera_microphone",
+            QWebEnginePage.Feature.Notifications: "notifications",
+            QWebEnginePage.Feature.DesktopVideoCapture: "screen_share",
+            QWebEnginePage.Feature.DesktopAudioVideoCapture: "screen_share_audio",
+        }
+        feature_name = feature_names.get(feature, str(feature))
+
+        saved = storage.get_permission(host, feature_name)
+        if saved == "allow":
+            self.setFeaturePermission(origin, feature,
+                QWebEnginePage.PermissionPolicy.PermissionGrantedByUser)
+            return
+        elif saved == "deny":
+            self.setFeaturePermission(origin, feature,
+                QWebEnginePage.PermissionPolicy.PermissionDeniedByUser)
+            return
+
+        mw = self._get_main_window()
+        if mw:
+            mw._show_permission_prompt(origin, feature, feature_name, host)
+        else:
+            self.setFeaturePermission(origin, feature,
+                QWebEnginePage.PermissionPolicy.PermissionDeniedByUser)
 
     def acceptNavigationRequest(self, url, nav_type, is_main_frame):
         """Rewrite loopback IPs to localhost and upgrade http to https."""
@@ -189,6 +224,12 @@ class ShroudWebView(QWebEngineView):
             save_img.triggered.connect(lambda: self.triggerPageAction(QWebEnginePage.WebAction.DownloadMediaToDisk))
             menu.addSeparator()
 
+        # Video/media actions - PiP
+        if media_type == QWebEngineContextMenuRequest.MediaType.MediaTypeVideo and media_url.isValid():
+            pip_act = menu.addAction("Picture in Picture")
+            pip_act.triggered.connect(lambda: self._toggle_pip())
+            menu.addSeparator()
+
         # Selected text actions
         if selected_text:
             copy_act = menu.addAction("Copy")
@@ -231,6 +272,22 @@ class ShroudWebView(QWebEngineView):
             )
             url = QUrl(search.format(QUrl.toPercentEncoding(text).data().decode()))
             self._open_in_new_tab(url)
+
+    def _toggle_pip(self):
+        """Toggle picture-in-picture for the focused video element."""
+        js = """
+        (function() {
+            var video = document.querySelector('video');
+            if (!video) return false;
+            if (document.pictureInPictureElement) {
+                document.exitPictureInPicture();
+            } else {
+                video.requestPictureInPicture();
+            }
+            return true;
+        })()
+        """
+        self.page().runJavaScript(js)
 
     def _view_source(self):
         if self._tab_widget and hasattr(self._tab_widget, "_view_source"):

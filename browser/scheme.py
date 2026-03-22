@@ -34,6 +34,7 @@ def register_shroud_scheme():
 _PAGES = {
     "newtab": "New Tab",
     "about": "About Shroudbyte",
+    "shortcuts": "Keyboard Shortcuts",
 }
 
 
@@ -52,6 +53,8 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
             html = generate_new_tab_html()
         elif host == "about":
             html = self._page_about()
+        elif host == "shortcuts":
+            html = self._page_shortcuts()
         else:
             html = self._page_error(url.toString())
 
@@ -193,6 +196,178 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
     </div>
     <div class="section-label">Internal Pages</div>
     <div class="pages">
+      {page_links}
+    </div>
+  </div>
+</body>
+</html>"""
+
+    def _page_shortcuts(self):
+        categories = [
+            ("Tabs", [
+                ("Ctrl+T", "New Tab"),
+                ("Ctrl+W", "Close Tab"),
+                ("Ctrl+Shift+T", "Reopen Closed Tab"),
+                ("Ctrl+N", "New Window"),
+                ("Ctrl+Shift+P", "New Private Window"),
+                ("Alt+1\u20139", "Switch to Tab 1\u20139"),
+            ]),
+            ("Navigation", [
+                ("Ctrl+L / F6", "Focus URL Bar"),
+                ("F5 / Ctrl+R", "Reload"),
+                ("Ctrl+Shift+R", "Hard Reload"),
+                ("Escape", "Stop Loading"),
+                ("Ctrl+F", "Find on Page"),
+            ]),
+            ("View", [
+                ("Ctrl+=", "Zoom In"),
+                ("Ctrl+\u2212", "Zoom Out"),
+                ("Ctrl+0", "Reset Zoom"),
+                ("F9", "Reader Mode"),
+                ("F11", "Full Screen"),
+                ("Ctrl+U", "View Source"),
+                ("Ctrl+P", "Print"),
+                ("Ctrl+Shift+S", "Save as PDF"),
+                ("Ctrl+Shift+E", "Screenshot"),
+            ]),
+            ("Tools", [
+                ("Ctrl+D", "Bookmark Page"),
+                ("Ctrl+Shift+B", "Show Bookmarks"),
+                ("Ctrl+H", "Show History"),
+                ("Ctrl+Shift+M", "Password Manager"),
+                ("Ctrl+Shift+L", "Auto-fill Password"),
+                ("Ctrl+J", "Downloads"),
+                ("F12", "Developer Tools"),
+                ("F1", "Keyboard Shortcuts"),
+                ("Ctrl+Q", "Quit"),
+            ]),
+        ]
+
+        sections_html = ""
+        anim_delay = 0.18
+        for cat_name, shortcuts in categories:
+            rows = "\n".join(
+                f'              <tr>'
+                f'<td class="key"><kbd>{html_mod.escape(key)}</kbd></td>'
+                f'<td class="desc">{html_mod.escape(desc)}</td>'
+                f'</tr>'
+                for key, desc in shortcuts
+            )
+            sections_html += f"""
+    <div class="category" style="animation-delay: {anim_delay:.2f}s;">
+      <h2>{html_mod.escape(cat_name)}</h2>
+      <div class="info-card">
+        <table>
+{rows}
+        </table>
+      </div>
+    </div>"""
+            anim_delay += 0.08
+
+        page_links = "\n      ".join(
+            f'<a href="shroud://{name}">shroud://{name}</a>'
+            for name in _PAGES
+        )
+
+        return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Keyboard Shortcuts \u2014 {__app_name__}</title>
+<style>
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{
+    background: {BG_DARK}; color: {TEXT};
+    font-family: 'Cantarell', 'Noto Sans', system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding-top: 10vh; padding-bottom: 8vh;
+  }}
+  .bg-glow {{
+    position: fixed; top: 14%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 800px; height: 500px;
+    background: radial-gradient(ellipse, rgba(205, 141, 106, 0.04) 0%, transparent 65%);
+    pointer-events: none; z-index: 0;
+  }}
+  .content {{
+    position: relative; z-index: 2;
+    display: flex; flex-direction: column; align-items: center;
+    width: 100%; max-width: 600px; padding: 0 24px;
+  }}
+  .wordmark {{
+    font-size: 28px; font-weight: 700;
+    letter-spacing: 6px; text-transform: uppercase; text-indent: 6px;
+    background: linear-gradient(
+      135deg, {ACCENT_HOVER} 0%, {ACCENT} 35%, {ACCENT_TEXT} 65%, {ACCENT} 100%
+    );
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    margin-bottom: 6px; user-select: none;
+  }}
+  .subtitle {{
+    font-size: 11px; color: {TEXT_FAINT};
+    letter-spacing: 3px; text-transform: uppercase;
+    margin-bottom: 40px;
+  }}
+  .category {{ width: 100%; margin-bottom: 28px; }}
+  .category h2 {{
+    font-size: 11px; text-transform: uppercase;
+    letter-spacing: 3px; color: {TEXT_FAINT};
+    font-weight: 600; margin-bottom: 10px; padding-left: 4px;
+  }}
+  .info-card {{
+    width: 100%; background: {BG_CARD};
+    border: 1px solid {BORDER}; border-radius: 12px;
+    padding: 8px 20px;
+  }}
+  .info-card table {{ width: 100%; border-collapse: collapse; }}
+  .info-card td {{ padding: 10px 0; font-size: 13px; vertical-align: middle; }}
+  .info-card td.key {{ width: 180px; }}
+  .info-card td.desc {{ color: {TEXT_DIM}; }}
+  .info-card tr + tr td {{ border-top: 1px solid {BORDER}; }}
+  kbd {{
+    display: inline-block;
+    padding: 4px 10px;
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 12px;
+    color: {TEXT};
+    background: {BG_DARK};
+    border: 1px solid {BORDER};
+    border-radius: 6px;
+    line-height: 1;
+  }}
+  .footer {{
+    margin-top: 16px;
+    display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+  }}
+  .footer a {{
+    padding: 8px 16px;
+    background: rgba(28, 27, 36, 0.6);
+    border: 1px solid rgba(40, 38, 51, 0.5);
+    border-radius: 8px; text-decoration: none;
+    color: {ACCENT}; font-size: 13px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    transition: all 0.2s ease;
+  }}
+  .footer a:hover {{
+    background: rgba(38, 36, 48, 0.85);
+    border-color: rgba(205, 141, 106, 0.3);
+    transform: translateY(-1px);
+  }}
+  @keyframes fadeIn {{
+    from {{ opacity: 0; transform: translateY(10px); }}
+    to   {{ opacity: 1; transform: translateY(0); }}
+  }}
+  .wordmark  {{ animation: fadeIn 0.5s ease 0.04s both; }}
+  .subtitle  {{ animation: fadeIn 0.5s ease 0.10s both; }}
+  .category  {{ animation: fadeIn 0.5s ease both; }}
+  .footer    {{ animation: fadeIn 0.5s ease 0.60s both; }}
+</style>
+</head>
+<body>
+  <div class="bg-glow"></div>
+  <div class="content">
+    <div class="wordmark">Shortcuts</div>
+    <div class="subtitle">Keyboard shortcuts</div>
+{sections_html}
+    <div class="footer">
       {page_links}
     </div>
   </div>
