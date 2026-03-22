@@ -5,6 +5,7 @@ import time
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -23,12 +24,18 @@ from .passwords import PasswordVault
 
 
 class MasterPasswordDialog(QDialog):
-    """Prompt user for master password (setup or unlock)."""
+    """Prompt user for master password (setup or unlock).
 
-    def __init__(self, vault: PasswordVault, parent=None):
+    When *keyring_available* is True and the vault is being set up for the
+    first time, an "Use OS keyring" checkbox is shown, letting the user
+    skip the master password entirely.
+    """
+
+    def __init__(self, vault: PasswordVault, parent=None, keyring_available: bool = False):
         super().__init__(parent)
         self._vault = vault
-        self._is_setup = not vault.is_setup()
+        self._is_setup = not vault.is_setup() and not vault.is_keyring_setup()
+        self._chosen_backend = "master_password"
         self.setWindowTitle("Set Master Password" if self._is_setup else "Unlock Password Vault")
         self.setMinimumWidth(400)
         self.setStyleSheet(style.PASSWORD_DIALOG_STYLE)
@@ -37,7 +44,21 @@ class MasterPasswordDialog(QDialog):
         layout.setSpacing(14)
         layout.setContentsMargins(24, 24, 24, 24)
 
-        if self._is_setup:
+        # --- Keyring option (first-time setup only) ---
+        self._keyring_check = None
+        if self._is_setup and keyring_available:
+            info = QLabel("Choose how to protect your saved credentials.")
+            info.setWordWrap(True)
+            layout.addWidget(info)
+
+            self._keyring_check = QCheckBox("Use OS keyring (no password needed)")
+            self._keyring_check.setToolTip(
+                "Store the encryption key in your system login keyring\n"
+                "(GNOME Keyring, KDE Wallet, etc.)"
+            )
+            self._keyring_check.toggled.connect(self._on_keyring_toggled)
+            layout.addWidget(self._keyring_check)
+        elif self._is_setup:
             info = QLabel("Choose a master password to protect your saved credentials.")
             info.setWordWrap(True)
             layout.addWidget(info)
@@ -47,6 +68,7 @@ class MasterPasswordDialog(QDialog):
         self._pw_edit.setPlaceholderText("Master password")
         layout.addWidget(self._pw_edit)
 
+        self._confirm_edit = None
         if self._is_setup:
             self._confirm_edit = QLineEdit()
             self._confirm_edit.setEchoMode(QLineEdit.EchoMode.Password)
@@ -60,12 +82,12 @@ class MasterPasswordDialog(QDialog):
 
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(8)
-        ok_btn = QPushButton("Set Password" if self._is_setup else "Unlock")
-        ok_btn.setStyleSheet(style.DIALOG_BTN_PRIMARY_STYLE)
+        self._ok_btn = QPushButton("Set Password" if self._is_setup else "Unlock")
+        self._ok_btn.setStyleSheet(style.DIALOG_BTN_PRIMARY_STYLE)
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setStyleSheet(style.DIALOG_BTN_STYLE)
 
-        ok_btn.clicked.connect(self._on_ok)
+        self._ok_btn.clicked.connect(self._on_ok)
         cancel_btn.clicked.connect(self.reject)
         self._pw_edit.returnPressed.connect(self._on_ok)
         if self._is_setup:
@@ -73,10 +95,33 @@ class MasterPasswordDialog(QDialog):
 
         btn_layout.addStretch()
         btn_layout.addWidget(cancel_btn)
-        btn_layout.addWidget(ok_btn)
+        btn_layout.addWidget(self._ok_btn)
         layout.addLayout(btn_layout)
 
+    def _on_keyring_toggled(self, checked: bool):
+        self._pw_edit.setEnabled(not checked)
+        self._pw_edit.setVisible(not checked)
+        if self._confirm_edit:
+            self._confirm_edit.setEnabled(not checked)
+            self._confirm_edit.setVisible(not checked)
+        self._ok_btn.setText("Create Vault" if checked else "Set Password")
+        self._error_label.setVisible(False)
+
+    @property
+    def chosen_backend(self) -> str:
+        return self._chosen_backend
+
     def _on_ok(self):
+        # Keyring mode — no password needed
+        if self._keyring_check and self._keyring_check.isChecked():
+            try:
+                self._vault.setup_with_keyring()
+                self._chosen_backend = "keyring"
+                self.accept()
+            except Exception as exc:
+                self._show_error(f"Keyring setup failed: {exc}")
+            return
+
         pw = self._pw_edit.text()
         if not pw:
             self._show_error("Password cannot be empty.")
@@ -90,9 +135,11 @@ class MasterPasswordDialog(QDialog):
                 self._show_error("Password must be at least 4 characters.")
                 return
             self._vault.setup(pw)
+            self._chosen_backend = "master_password"
             self.accept()
         else:
             if self._vault.unlock(pw):
+                self._chosen_backend = "master_password"
                 self.accept()
             else:
                 self._show_error("Wrong password.")

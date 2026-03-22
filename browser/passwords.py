@@ -103,6 +103,106 @@ class PasswordVault:
         return self._unlocked
 
     # ------------------------------------------------------------------
+    # Keyring-backed vault (no master password needed)
+    # ------------------------------------------------------------------
+
+    def setup_with_keyring(self):
+        """Create a new vault with a random Fernet key stored in the OS keyring."""
+        from . import keyring_backend
+
+        _ensure_dir()
+        key = Fernet.generate_key()
+        if not keyring_backend.store_secret("vault_fernet_key", key.decode("ascii")):
+            raise RuntimeError("Failed to store vault key in OS keyring")
+
+        f = Fernet(key)
+        (DATA_DIR / VERIFY_FILE).write_bytes(f.encrypt(b"shroudbyte-vault"))
+
+        self._fernet = f
+        self._entries = []
+        self._unlocked = True
+        self._save()
+
+    def unlock_with_keyring(self) -> bool:
+        """Unlock the vault using the Fernet key stored in the OS keyring."""
+        from . import keyring_backend
+
+        key_str = keyring_backend.get_secret("vault_fernet_key")
+        if not key_str:
+            return False
+
+        verify_path = DATA_DIR / VERIFY_FILE
+        if not verify_path.exists():
+            return False
+
+        f = Fernet(key_str.encode("ascii"))
+        try:
+            f.decrypt(verify_path.read_bytes())
+        except InvalidToken:
+            return False
+
+        self._fernet = f
+        self._unlocked = True
+        self._load()
+        return True
+
+    def is_keyring_setup(self) -> bool:
+        """True if a vault key exists in the OS keyring and a verify file is present."""
+        from . import keyring_backend
+        return (
+            keyring_backend.get_secret("vault_fernet_key") is not None
+            and (DATA_DIR / VERIFY_FILE).exists()
+        )
+
+    def migrate_to_keyring(self) -> bool:
+        """Migrate an unlocked master-password vault to keyring-backed storage.
+
+        The vault must already be unlocked. Generates a new Fernet key,
+        stores it in the keyring, re-encrypts everything, and removes
+        the salt file.
+        """
+        if not self._unlocked:
+            raise RuntimeError("Vault must be unlocked before migration")
+        from . import keyring_backend
+
+        key = Fernet.generate_key()
+        if not keyring_backend.store_secret("vault_fernet_key", key.decode("ascii")):
+            return False
+
+        f = Fernet(key)
+        self._fernet = f
+        (DATA_DIR / VERIFY_FILE).write_bytes(f.encrypt(b"shroudbyte-vault"))
+        self._save()
+
+        # Salt is no longer needed
+        salt_path = DATA_DIR / SALT_FILE
+        if salt_path.exists():
+            salt_path.unlink()
+        return True
+
+    def migrate_to_master_password(self, master_password: str) -> bool:
+        """Migrate an unlocked keyring-backed vault to master-password storage.
+
+        Re-encrypts with a PBKDF2-derived key and removes the keyring entry.
+        """
+        if not self._unlocked:
+            raise RuntimeError("Vault must be unlocked before migration")
+        from . import keyring_backend
+
+        _ensure_dir()
+        salt = os.urandom(16)
+        (DATA_DIR / SALT_FILE).write_bytes(salt)
+
+        key = _derive_key(master_password, salt)
+        f = Fernet(key)
+        self._fernet = f
+        (DATA_DIR / VERIFY_FILE).write_bytes(f.encrypt(b"shroudbyte-vault"))
+        self._save()
+
+        keyring_backend.delete_secret("vault_fernet_key")
+        return True
+
+    # ------------------------------------------------------------------
     # CRUD operations
     # ------------------------------------------------------------------
 

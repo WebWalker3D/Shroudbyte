@@ -113,6 +113,7 @@ DEFAULT_SETTINGS = {
     "custom_dns_fallback": True,
     "custom_dns_cert_fingerprint": "",
     "filterlist_last_update": 0,
+    "vault_backend": "master_password",
 }
 
 
@@ -124,6 +125,63 @@ def load_settings():
 
 def save_settings(settings):
     _save_json("settings.json", settings)
+
+
+# ---------------------------------------------------------------------------
+# DNS secret helpers (keyring-aware)
+# ---------------------------------------------------------------------------
+
+def get_dns_secret(settings: dict) -> str:
+    """Return the DNS HMAC secret from the keyring.
+
+    Falls back to settings.json only to support one-time migration of
+    secrets that were stored before keyring support was added.
+    """
+    from . import keyring_backend
+    val = keyring_backend.get_secret("dns_secret")
+    if val is not None:
+        return val
+    # Legacy fallback — migrate on next save
+    return settings.get("custom_dns_secret", "")
+
+
+def get_dns_cert_fingerprint(settings: dict) -> str:
+    """Return the DNS cert fingerprint from the keyring."""
+    from . import keyring_backend
+    val = keyring_backend.get_secret("dns_cert_fingerprint")
+    if val is not None:
+        return val
+    return settings.get("custom_dns_cert_fingerprint", "")
+
+
+def save_dns_secrets(settings: dict, secret: str, fingerprint: str):
+    """Store DNS secrets in the OS keyring.
+
+    Raises RuntimeError if the keyring is not available — secrets must
+    never be written to settings.json in plaintext.
+    """
+    from . import keyring_backend
+    if not keyring_backend.is_available():
+        raise RuntimeError(
+            "OS keyring is not available. Cannot store DNS credentials securely.\n"
+            "Install and configure a system keyring (GNOME Keyring, KDE Wallet, etc.)."
+        )
+    if not keyring_backend.store_secret("dns_secret", secret):
+        raise RuntimeError("Failed to store DNS secret in OS keyring.")
+    if fingerprint:
+        keyring_backend.store_secret("dns_cert_fingerprint", fingerprint)
+    # Ensure plaintext is never in settings.json
+    settings["custom_dns_secret"] = ""
+    settings["custom_dns_cert_fingerprint"] = ""
+
+
+def clear_dns_secrets(settings: dict):
+    """Remove DNS secrets from both keyring and settings dict."""
+    from . import keyring_backend
+    keyring_backend.delete_secret("dns_secret")
+    keyring_backend.delete_secret("dns_cert_fingerprint")
+    settings["custom_dns_secret"] = ""
+    settings["custom_dns_cert_fingerprint"] = ""
 
 
 # ---------------------------------------------------------------------------

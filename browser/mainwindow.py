@@ -184,6 +184,8 @@ class MainWindow(QMainWindow):
 
         # Password vault
         self._vault = PasswordVault()
+        if self._settings.get("vault_backend") == "keyring":
+            self._vault.unlock_with_keyring()
         self._password_save_bar = None
 
         # Closed tabs stack (for Ctrl+Shift+T)
@@ -1738,8 +1740,8 @@ class MainWindow(QMainWindow):
         custom_dns_server.setToolTip("Base URL of your Shroud DNS server")
 
         # Registration state tracking (in-dialog, persisted on Save)
-        _reg_secret = [self._settings.get("custom_dns_secret", "")]
-        _reg_fingerprint = [self._settings.get("custom_dns_cert_fingerprint", "")]
+        _reg_secret = [storage.get_dns_secret(self._settings)]
+        _reg_fingerprint = [storage.get_dns_cert_fingerprint(self._settings)]
 
         is_registered = bool(_reg_secret[0])
         dns_status_label = QLabel(
@@ -1775,11 +1777,10 @@ class MainWindow(QMainWindow):
                 )
                 if confirm != QMessageBox.StandardButton.Yes:
                     return
-                # Clear credentials and save immediately
+                # Clear credentials from keyring and settings
+                storage.clear_dns_secrets(self._settings)
                 self._settings["custom_dns_enabled"] = False
                 self._settings["custom_dns_server"] = ""
-                self._settings["custom_dns_secret"] = ""
-                self._settings["custom_dns_cert_fingerprint"] = ""
                 storage.save_settings(self._settings)
                 dialog.reject()
                 # Restart the browser
@@ -1818,11 +1819,12 @@ class MainWindow(QMainWindow):
                 data = _json.loads(resp.read())
                 conn.close()
 
-                # Save credentials and restart immediately
+                # Save credentials to OS keyring (raises if unavailable)
+                secret = data["secret"]
+                fingerprint = data.get("cert_fingerprint", "")
+                storage.save_dns_secrets(self._settings, secret, fingerprint)
                 self._settings["custom_dns_enabled"] = True
                 self._settings["custom_dns_server"] = base
-                self._settings["custom_dns_secret"] = data["secret"]
-                self._settings["custom_dns_cert_fingerprint"] = data.get("cert_fingerprint", "")
                 storage.save_settings(self._settings)
                 QApplication.restoreOverrideCursor()
                 dialog.reject()
@@ -1907,12 +1909,15 @@ class MainWindow(QMainWindow):
             self._settings["dns_over_https_provider"] = doh_provider_edit.text().strip()
             server_url = custom_dns_server.text().strip()
             secret = _reg_secret[0]
+            fingerprint = _reg_fingerprint[0]
             # Auto-enable when registered, auto-disable when URL cleared
             self._settings["custom_dns_enabled"] = bool(server_url and secret)
             self._settings["custom_dns_server"] = server_url
-            self._settings["custom_dns_secret"] = secret
             self._settings["custom_dns_fallback"] = custom_dns_fallback.isChecked()
-            self._settings["custom_dns_cert_fingerprint"] = _reg_fingerprint[0]
+            if secret:
+                storage.save_dns_secrets(self._settings, secret, fingerprint)
+            else:
+                storage.clear_dns_secrets(self._settings)
             storage.save_settings(self._settings)
 
             # Update proxy config at runtime if it's running
@@ -1920,9 +1925,9 @@ class MainWindow(QMainWindow):
                 _base = self._settings["custom_dns_server"].rstrip("/")
                 self._dns_proxy.update_config(
                     pfsense_url=_base + "/shroud-dns-query" if _base else "",
-                    shared_secret=self._settings["custom_dns_secret"],
+                    shared_secret=secret,
                     fallback=self._settings["custom_dns_fallback"],
-                    cert_fingerprint=self._settings["custom_dns_cert_fingerprint"],
+                    cert_fingerprint=fingerprint,
                 )
 
             self._apply_profile_settings()
@@ -1949,8 +1954,41 @@ class MainWindow(QMainWindow):
         """Prompt for master password if needed. Returns True if vault is unlocked."""
         if self._vault.is_unlocked:
             return True
-        dlg = MasterPasswordDialog(self._vault, parent=self)
-        return dlg.exec() == QDialog.DialogCode.Accepted
+
+        from . import keyring_backend
+
+        # Keyring backend — try auto-unlock, no dialog needed
+        if self._settings.get("vault_backend") == "keyring":
+            if self._vault.unlock_with_keyring():
+                return True
+            QMessageBox.warning(
+                self, "Password Vault",
+                "Could not access OS keyring.\n"
+                "You may need to unlock your login keyring."
+            )
+            return False
+
+        # No vault exists yet — auto-create with keyring if available
+        if not self._vault.is_setup() and keyring_backend.is_available():
+            try:
+                self._vault.setup_with_keyring()
+                self._settings["vault_backend"] = "keyring"
+                storage.save_settings(self._settings)
+                return True
+            except Exception:
+                pass  # Fall through to master password dialog
+
+        dlg = MasterPasswordDialog(
+            self._vault, parent=self,
+            keyring_available=keyring_backend.is_available(),
+        )
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            # Save chosen backend on first setup
+            if dlg.chosen_backend != self._settings.get("vault_backend", "master_password"):
+                self._settings["vault_backend"] = dlg.chosen_backend
+                storage.save_settings(self._settings)
+            return True
+        return False
 
     def _show_password_manager(self):
         if not self._ensure_vault_unlocked():
@@ -2784,12 +2822,16 @@ class MainWindow(QMainWindow):
                 self._profile.clearHttpCache()
                 cleared.append("cache")
             if passwords_check.isChecked():
-                if self._vault.is_setup():
+                if self._vault.is_setup() or self._vault.is_keyring_setup():
                     from .storage import DATA_DIR
+                    from . import keyring_backend
                     for fname in ("passwords.enc", "passwords.salt", "passwords.verify"):
                         p = DATA_DIR / fname
                         if p.exists():
                             p.unlink()
+                    keyring_backend.delete_secret("vault_fernet_key")
+                    self._settings["vault_backend"] = "master_password"
+                    storage.save_settings(self._settings)
                     self._vault.lock()
                     cleared.append("passwords")
 

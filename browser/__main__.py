@@ -34,7 +34,21 @@ _settings = _storage.load_settings()
 
 _proxy_instance = None
 
-if _settings.get("custom_dns_enabled") and _settings.get("custom_dns_server") and _settings.get("custom_dns_secret"):
+_dns_secret = _storage.get_dns_secret(_settings)
+_dns_fingerprint = _storage.get_dns_cert_fingerprint(_settings)
+
+# Migrate legacy plaintext secrets to keyring on first launch
+if _dns_secret and _settings.get("custom_dns_secret"):
+    from . import keyring_backend as _kb
+    if _kb.is_available():
+        _kb.store_secret("dns_secret", _dns_secret)
+        if _dns_fingerprint:
+            _kb.store_secret("dns_cert_fingerprint", _dns_fingerprint)
+        _settings["custom_dns_secret"] = ""
+        _settings["custom_dns_cert_fingerprint"] = ""
+        _storage.save_settings(_settings)
+
+if _settings.get("custom_dns_enabled") and _settings.get("custom_dns_server") and _dns_secret:
     # Custom authenticated DNS via local SOCKS5 proxy.
     # Settings store the base URL (e.g. https://pfsense:8853); append the
     # query path so the proxy gets the full endpoint.
@@ -42,9 +56,9 @@ if _settings.get("custom_dns_enabled") and _settings.get("custom_dns_server") an
     _dns_base = _settings["custom_dns_server"].rstrip("/")
     _proxy_instance = ShroudSOCKS5Proxy(
         pfsense_url=_dns_base + "/shroud-dns-query",
-        shared_secret=_settings["custom_dns_secret"],
+        shared_secret=_dns_secret,
         fallback=_settings.get("custom_dns_fallback", True),
-        cert_fingerprint=_settings.get("custom_dns_cert_fingerprint", ""),
+        cert_fingerprint=_dns_fingerprint,
     )
     _proxy_port = _proxy_instance.start()
 
