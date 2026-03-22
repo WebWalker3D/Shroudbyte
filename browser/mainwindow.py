@@ -2798,16 +2798,14 @@ class MainWindow(QMainWindow):
             win.close()
         self._detached_windows = []
 
-        # Explicitly destroy all tab pages before the profile is torn down.
-        # Qt's default destruction order deletes the QWebEngineProfile before
-        # the QWebEnginePage objects, which triggers:
-        #   "Release of profile requested but WebEnginePage still not deleted"
-        while self._tabs.count():
-            view = self._tabs.widget(0)
-            self._tabs.removeTab(0)
-            if view:
-                view.setPage(None)
-                view.deleteLater()
+        # Delete pages before the profile, but AFTER Qt has flushed cookies
+        # to disk.  Setting the page to None before the profile is destroyed
+        # prevents the "profile requested but page still not deleted" warning
+        # while letting the cookie store persist session data.
+        for i in range(self._tabs.count()):
+            view = self._tabs.widget(i)
+            if view and view.page():
+                view.page().deleteLater()
 
         event.accept()
 

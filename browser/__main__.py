@@ -11,6 +11,14 @@ import sys
 from . import crashhandler as _crashhandler
 _crashhandler.install()
 
+# Suppress noisy Chromium/Qt warnings that are not actionable.
+os.environ["QT_LOGGING_RULES"] = os.environ.get("QT_LOGGING_RULES", "") + \
+    ";qt.qpa.wayland.textinput=false"
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = \
+    os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "") + \
+    " --disable-features=AutofillServerCommunication" \
+    " --disable-gpu-shader-disk-cache"
+
 # QtWebEngine (Chromium) refuses to run as root without disabling its sandbox.
 # This is safe for a personal desktop browser.
 if os.getuid() == 0:
@@ -25,6 +33,7 @@ _gpu_flags += " --enable-zero-copy"
 _gpu_flags += " --enable-features=CanvasOopRasterization"
 _gpu_flags += " --allow-insecure-localhost"
 _gpu_flags += " --disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessRespectPreflightResults"
+_gpu_flags += " --log-level=3"
 os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _gpu_flags.strip()
 
 # DNS configuration — must be set before QApplication is created
