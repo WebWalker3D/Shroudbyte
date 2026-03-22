@@ -62,8 +62,9 @@ class ShroudSOCKS5Proxy:
     ) -> None:
         """
         Args:
-            pfsense_url: DoH endpoint, e.g.
+            pfsense_url: Full DoH endpoint URL including path, e.g.
                 ``"https://pfsense.local:8853/shroud-dns-query"``.
+                (Callers pass the base URL from settings with path appended.)
             shared_secret: Hex-encoded HMAC-SHA256 shared secret.
             fallback: If *True*, fall back to system DNS when pfSense is
                 unreachable.

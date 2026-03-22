@@ -115,21 +115,53 @@ def forward_dns(query: bytes, unbound_host: str, unbound_port: int) -> bytes:
 
 
 def make_handler(shared_secret: bytes, nonce_tracker: NonceTracker,
-                 unbound_host: str, unbound_port: int):
+                 unbound_host: str, unbound_port: int,
+                 cert_path: str = ""):
     """Factory that returns a request handler class with bound config."""
+
+    # Pre-compute cert fingerprint for registration endpoint.
+    _cert_fingerprint = ""
+    if cert_path:
+        try:
+            with open(cert_path, "r") as _f:
+                _pem = _f.read()
+            _der = ssl.PEM_cert_to_DER_cert(_pem)
+            _cert_fingerprint = hashlib.sha256(_der).hexdigest()
+            log.info("Cert fingerprint: %s", _cert_fingerprint)
+        except Exception:
+            log.exception("Failed to compute cert fingerprint")
 
     class ShroudHandler(BaseHTTPRequestHandler):
         # Suppress default stderr logging; we use our own logger.
         def log_message(self, fmt, *args):
             log.info("%s %s", self.client_address[0], fmt % args)
 
-        # ---- Health check ------------------------------------------------
+        # ---- Health check / registration ---------------------------------
 
         def do_GET(self):
             if self.path == "/health":
                 self._send_text(200, "ok")
                 return
+            if self.path == "/shroud-dns-register":
+                self._handle_register()
+                return
             self._send_text(404, "not found")
+
+        def _handle_register(self):
+            """Return shared secret and cert fingerprint for auto-setup."""
+            import json as _json
+            payload = {
+                "secret": shared_secret.hex(),
+                "cert_fingerprint": _cert_fingerprint,
+            }
+            body = _json.dumps(payload).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            log.info("Registration request served to %s",
+                     self.client_address[0])
 
         # ---- DNS query ---------------------------------------------------
 
@@ -281,7 +313,8 @@ def main() -> None:
 
     # Build handler
     tracker = NonceTracker()
-    handler_cls = make_handler(secret, tracker, unbound_host, unbound_port)
+    handler_cls = make_handler(secret, tracker, unbound_host, unbound_port,
+                               cert_path=args.cert)
 
     # Create HTTPS server
     server = HTTPServer((args.listen, args.port), handler_cls)

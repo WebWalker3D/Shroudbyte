@@ -1711,54 +1711,113 @@ class MainWindow(QMainWindow):
 
         layout.addRow("Restore Session", session_check)
 
-        # --- Custom DNS (Shroud DNS) section ---
-        dns_separator = QLabel("── Custom DNS ──")
+        # --- Shroud DNS section ---
+        dns_separator = QLabel("── Shroud DNS ──")
         dns_separator.setStyleSheet(f"color: {style.TEXT_DIM}; font-size: 12px;")
         dns_separator.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addRow(dns_separator)
 
-        custom_dns_check = QCheckBox("Enabled (requires restart)")
-        custom_dns_check.setChecked(self._settings.get("custom_dns_enabled", False))
-
         custom_dns_server = QLineEdit(self._settings.get("custom_dns_server", ""))
-        custom_dns_server.setPlaceholderText("https://pfsense.local:8853/shroud-dns-query")
-        custom_dns_server.setToolTip("URL of your Shroud DNS server on pfSense")
+        custom_dns_server.setPlaceholderText("https://pfsense.local:8853")
+        custom_dns_server.setToolTip("Base URL of your Shroud DNS server")
 
-        custom_dns_secret = QLineEdit(self._settings.get("custom_dns_secret", ""))
-        custom_dns_secret.setEchoMode(QLineEdit.EchoMode.Password)
-        custom_dns_secret.setPlaceholderText("Shared HMAC secret (hex)")
+        # Registration state tracking (in-dialog, persisted on Save)
+        _reg_secret = [self._settings.get("custom_dns_secret", "")]
+        _reg_fingerprint = [self._settings.get("custom_dns_cert_fingerprint", "")]
+
+        is_registered = bool(_reg_secret[0])
+        dns_status_label = QLabel(
+            "Registered" if is_registered else "Not registered"
+        )
+        dns_status_label.setStyleSheet(
+            f"color: {'#4caf50' if is_registered else style.TEXT_FAINT}; font-size: 11px;"
+        )
+
+        register_btn = QPushButton("Register")
+        register_btn.setStyleSheet(style.DIALOG_BTN_STYLE)
+        register_btn.setFixedWidth(90)
+
+        def _do_register():
+            url = custom_dns_server.text().strip()
+            if not url:
+                QMessageBox.warning(dialog, "Shroud DNS", "Enter a server URL first.")
+                return
+            # Normalize: strip trailing slash and path
+            base = url.rstrip("/")
+            for suffix in ("/shroud-dns-query", "/shroud-dns-register", "/health"):
+                if base.endswith(suffix):
+                    base = base[: -len(suffix)]
+                    break
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            try:
+                import http.client
+                import json as _json
+                import ssl as _ssl
+                import urllib.parse
+                parsed = urllib.parse.urlparse(base)
+                ctx = _ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = _ssl.CERT_NONE
+                conn = http.client.HTTPSConnection(
+                    parsed.hostname, parsed.port or 443,
+                    context=ctx, timeout=10,
+                )
+                conn.connect()
+                conn.request("GET", "/shroud-dns-register")
+                resp = conn.getresponse()
+                if resp.status != 200:
+                    raise RuntimeError(f"Server returned HTTP {resp.status}")
+                data = _json.loads(resp.read())
+                conn.close()
+
+                _reg_secret[0] = data["secret"]
+                _reg_fingerprint[0] = data.get("cert_fingerprint", "")
+                custom_dns_server.setText(base)
+                dns_status_label.setText("Registered")
+                dns_status_label.setStyleSheet("color: #4caf50; font-size: 11px;")
+                QMessageBox.information(
+                    dialog, "Shroud DNS",
+                    "Registration successful. Click Save, then restart the browser."
+                )
+            except Exception as exc:
+                QMessageBox.critical(
+                    dialog, "Shroud DNS",
+                    f"Registration failed:\n{exc}"
+                )
+            finally:
+                QApplication.restoreOverrideCursor()
+
+        register_btn.clicked.connect(_do_register)
+
+        # URL row with register button
+        url_row = QHBoxLayout()
+        url_row.setSpacing(6)
+        url_row.addWidget(custom_dns_server, 1)
+        url_row.addWidget(register_btn)
+        url_container = QWidget()
+        url_container.setLayout(url_row)
 
         custom_dns_fallback = QCheckBox("Fall back to system DNS if server unreachable")
         custom_dns_fallback.setChecked(self._settings.get("custom_dns_fallback", True))
 
-        custom_dns_fingerprint = QLineEdit(self._settings.get("custom_dns_cert_fingerprint", ""))
-        custom_dns_fingerprint.setPlaceholderText("SHA-256 fingerprint (hex) — leave empty to skip verification")
-        custom_dns_fingerprint.setToolTip("Pin the server's TLS certificate by its SHA-256 fingerprint")
-
-        layout.addRow("Custom DNS", custom_dns_check)
-        layout.addRow("DNS Server URL", custom_dns_server)
-        layout.addRow("Auth Secret", custom_dns_secret)
-        layout.addRow("Cert Fingerprint", custom_dns_fingerprint)
+        layout.addRow("Server", url_container)
+        layout.addRow("Status", dns_status_label)
         layout.addRow("", custom_dns_fallback)
 
         custom_dns_note = QLabel(
-            "When enabled, overrides DNS-over-HTTPS above.\n"
-            "All DNS queries go through your authenticated server."
+            "Enter your server URL and click Register.\n"
+            "When registered, overrides DNS-over-HTTPS above.\n"
+            "Clear the URL and save to disable. Requires restart."
         )
         custom_dns_note.setStyleSheet(f"color: {style.TEXT_FAINT}; font-size: 11px;")
         layout.addRow("", custom_dns_note)
 
-        # Grey out DoH fields when custom DNS is enabled and vice versa
+        # Grey out DoH fields when Shroud DNS is registered
         def _toggle_dns_sections():
-            custom = custom_dns_check.isChecked()
-            doh_combo.setEnabled(not custom)
-            doh_provider_edit.setEnabled(not custom)
-            custom_dns_server.setEnabled(custom)
-            custom_dns_secret.setEnabled(custom)
-            custom_dns_fingerprint.setEnabled(custom)
-            custom_dns_fallback.setEnabled(custom)
+            registered = bool(_reg_secret[0])
+            doh_combo.setEnabled(not registered)
+            doh_provider_edit.setEnabled(not registered)
 
-        custom_dns_check.toggled.connect(_toggle_dns_sections)
         _toggle_dns_sections()
 
         scroll.setWidget(form_widget)
@@ -1797,17 +1856,21 @@ class MainWindow(QMainWindow):
             self._settings["fingerprint_resistance"] = fp_check.isChecked()
             self._settings["dns_over_https"] = doh_combo.currentText()
             self._settings["dns_over_https_provider"] = doh_provider_edit.text().strip()
-            self._settings["custom_dns_enabled"] = custom_dns_check.isChecked()
-            self._settings["custom_dns_server"] = custom_dns_server.text().strip()
-            self._settings["custom_dns_secret"] = custom_dns_secret.text().strip()
+            server_url = custom_dns_server.text().strip()
+            secret = _reg_secret[0]
+            # Auto-enable when registered, auto-disable when URL cleared
+            self._settings["custom_dns_enabled"] = bool(server_url and secret)
+            self._settings["custom_dns_server"] = server_url
+            self._settings["custom_dns_secret"] = secret
             self._settings["custom_dns_fallback"] = custom_dns_fallback.isChecked()
-            self._settings["custom_dns_cert_fingerprint"] = custom_dns_fingerprint.text().strip()
+            self._settings["custom_dns_cert_fingerprint"] = _reg_fingerprint[0]
             storage.save_settings(self._settings)
 
             # Update proxy config at runtime if it's running
             if self._dns_proxy is not None:
+                _base = self._settings["custom_dns_server"].rstrip("/")
                 self._dns_proxy.update_config(
-                    pfsense_url=self._settings["custom_dns_server"],
+                    pfsense_url=_base + "/shroud-dns-query" if _base else "",
                     shared_secret=self._settings["custom_dns_secret"],
                     fallback=self._settings["custom_dns_fallback"],
                     cert_fingerprint=self._settings["custom_dns_cert_fingerprint"],

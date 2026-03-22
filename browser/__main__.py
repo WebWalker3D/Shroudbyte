@@ -35,10 +35,13 @@ _settings = _storage.load_settings()
 _proxy_instance = None
 
 if _settings.get("custom_dns_enabled") and _settings.get("custom_dns_server") and _settings.get("custom_dns_secret"):
-    # Custom authenticated DNS via local SOCKS5 proxy
+    # Custom authenticated DNS via local SOCKS5 proxy.
+    # Settings store the base URL (e.g. https://pfsense:8853); append the
+    # query path so the proxy gets the full endpoint.
     from .dns_proxy import ShroudSOCKS5Proxy
+    _dns_base = _settings["custom_dns_server"].rstrip("/")
     _proxy_instance = ShroudSOCKS5Proxy(
-        pfsense_url=_settings["custom_dns_server"],
+        pfsense_url=_dns_base + "/shroud-dns-query",
         shared_secret=_settings["custom_dns_secret"],
         fallback=_settings.get("custom_dns_fallback", True),
         cert_fingerprint=_settings.get("custom_dns_cert_fingerprint", ""),

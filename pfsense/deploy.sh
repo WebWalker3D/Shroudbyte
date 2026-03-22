@@ -29,6 +29,31 @@ PORT=8853
 echo "=== Shroud DNS Server Deployment ==="
 echo ""
 
+# 0. Clean up legacy Blade DNS installation if present
+OLD_RC="/usr/local/etc/rc.d/blade_dns"
+OLD_PID="/var/run/blade_dns.pid"
+OLD_DIR="/usr/local/etc/blade_dns"
+OLD_SECRET="/usr/local/etc/blade_dns.key"
+
+if [ -f "${OLD_RC}" ] || [ -d "${OLD_DIR}" ]; then
+    echo "[0/7] Removing legacy Blade DNS installation..."
+    # Stop old service
+    if [ -f "${OLD_PID}" ] && kill -0 "$(cat "${OLD_PID}")" 2>/dev/null; then
+        "${OLD_RC}" stop 2>/dev/null || true
+        sleep 1
+    fi
+    # Kill by name if pid stop didn't work
+    pkill -f "blade_dns_server.py" 2>/dev/null || true
+    # Disable old service
+    sysrc -x blade_dns_enable 2>/dev/null || true
+    # Remove old files
+    rm -f "${OLD_RC}"
+    rm -f "${OLD_PID}"
+    rm -f "${OLD_SECRET}"
+    rm -rf "${OLD_DIR}"
+    echo "       Legacy Blade DNS removed."
+fi
+
 # 1. Create directory
 echo "[1/7] Creating ${INSTALL_DIR}..."
 mkdir -p "${INSTALL_DIR}"
@@ -53,27 +78,22 @@ else
     python3.11 -c "import secrets; print(secrets.token_hex(32))" > "${SECRET_FILE}"
     chmod 600 "${SECRET_FILE}"
 fi
-echo ""
-echo "  *** YOUR SHARED SECRET (paste this into Shroudbyte settings): ***"
-echo "  $(cat ${SECRET_FILE})"
+echo "       Secret generated (auto-fetched during browser registration)"
 echo ""
 
-# 4. Install server script
+# 4. Install / update server script
 echo "[4/7] Installing shroud_dns_server.py..."
 # If this script is run via: ssh admin@pfsense "sh -s" < deploy.sh
 # the server script must already be on the box. Copy it there first:
 #   scp shroud_dns_server.py admin@pfsense:/usr/local/etc/shroud_dns/
-if [ ! -f "${SERVER_SCRIPT}" ]; then
-    # Check if shroud_dns_server.py is in the same directory as this script
-    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-    if [ -f "${SCRIPT_DIR}/shroud_dns_server.py" ]; then
-        cp "${SCRIPT_DIR}/shroud_dns_server.py" "${SERVER_SCRIPT}"
-    else
-        echo "ERROR: ${SERVER_SCRIPT} not found."
-        echo "Copy shroud_dns_server.py to ${INSTALL_DIR}/ first:"
-        echo "  scp shroud_dns_server.py admin@pfsense:${SERVER_SCRIPT}"
-        exit 1
-    fi
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "${SCRIPT_DIR}/shroud_dns_server.py" ]; then
+    cp "${SCRIPT_DIR}/shroud_dns_server.py" "${SERVER_SCRIPT}"
+elif [ ! -f "${SERVER_SCRIPT}" ]; then
+    echo "ERROR: ${SERVER_SCRIPT} not found."
+    echo "Copy shroud_dns_server.py to ${INSTALL_DIR}/ first:"
+    echo "  scp shroud_dns_server.py admin@pfsense:${SERVER_SCRIPT}"
+    exit 1
 fi
 chmod 755 "${SERVER_SCRIPT}"
 
@@ -125,14 +145,13 @@ fi
 echo ""
 echo "=== Deployment Complete ==="
 echo ""
-echo "Server: https://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'YOUR_PFSENSE_IP'):${PORT}/shroud-dns-query"
-echo "Secret: $(cat ${SECRET_FILE})"
+SERVER_URL="https://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'YOUR_PFSENSE_IP'):${PORT}"
+echo "Server: ${SERVER_URL}"
 echo ""
-echo "In Shroudbyte settings:"
-echo "  1. Enable 'Custom DNS'"
-echo "  2. DNS Server URL: https://YOUR_PFSENSE_IP:${PORT}/shroud-dns-query"
-echo "  3. Auth Secret: $(cat ${SECRET_FILE})"
-echo "  4. Restart the browser"
+echo "In Shroudbyte settings (Shroud DNS section):"
+echo "  1. Enter: ${SERVER_URL}"
+echo "  2. Click Register"
+echo "  3. Restart the browser"
 echo ""
 echo "To check logs:  tail -f /var/log/messages | grep shroud"
 echo "To test:        curl -k https://localhost:${PORT}/health"
