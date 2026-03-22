@@ -2038,6 +2038,23 @@ class MainWindow(QMainWindow):
                 storage.clear_session()
         # Lock the password vault
         self._vault.lock()
+
+        # Close detached (popup) windows first
+        for win in list(getattr(self, "_detached_windows", [])):
+            win.close()
+        self._detached_windows = []
+
+        # Explicitly destroy all tab pages before the profile is torn down.
+        # Qt's default destruction order deletes the QWebEngineProfile before
+        # the QWebEnginePage objects, which triggers:
+        #   "Release of profile requested but WebEnginePage still not deleted"
+        while self._tabs.count():
+            view = self._tabs.widget(0)
+            self._tabs.removeTab(0)
+            if view:
+                view.setPage(None)
+                view.deleteLater()
+
         event.accept()
 
     # ------------------------------------------------------------------
