@@ -31,6 +31,7 @@ _gpu_flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
 _gpu_flags += " --enable-gpu-rasterization"
 _gpu_flags += " --enable-zero-copy"
 _gpu_flags += " --enable-features=CanvasOopRasterization"
+_gpu_flags += " --disable-gpu-compositing"
 _gpu_flags += " --allow-insecure-localhost"
 _gpu_flags += " --disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessRespectPreflightResults,Translate"
 _gpu_flags += " --log-level=3"

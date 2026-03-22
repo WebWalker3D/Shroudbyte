@@ -447,3 +447,38 @@ class PasswordSaveBar(QFrame):
     def _remove(self):
         self.setParent(None)
         self.deleteLater()
+
+
+class AutofillBar(QFrame):
+    """Notification bar offering to auto-fill saved credentials into a login form."""
+
+    def __init__(self, username: str, on_fill, on_dismiss, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet(style.PASSWORD_SAVE_BAR_STYLE)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(10)
+
+        label = QLabel(f"Auto-fill password for {username}?")
+        label.setStyleSheet(f"color: {style.TEXT}; font-size: 13px;")
+
+        fill_btn = QPushButton("Fill")
+        fill_btn.setStyleSheet(style.DIALOG_BTN_PRIMARY_STYLE)
+        fill_btn.setFixedHeight(30)
+
+        dismiss_btn = QPushButton("Dismiss")
+        dismiss_btn.setStyleSheet(style.DIALOG_BTN_STYLE)
+        dismiss_btn.setFixedHeight(30)
+
+        fill_btn.clicked.connect(lambda: (on_fill(), self._remove()))
+        dismiss_btn.clicked.connect(lambda: (on_dismiss(), self._remove()))
+
+        layout.addWidget(label)
+        layout.addStretch()
+        layout.addWidget(fill_btn)
+        layout.addWidget(dismiss_btn)
+
+    def _remove(self):
+        self.setParent(None)
+        self.deleteLater()

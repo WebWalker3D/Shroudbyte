@@ -58,6 +58,7 @@ from . import filterlists
 from .fingerprint import get_fingerprint_resistance_js
 from .passwords import PasswordVault
 from .passworddialogs import (
+    AutofillBar,
     HttpAuthDialog,
     MasterPasswordDialog,
     PasswordManagerDialog,
@@ -187,6 +188,7 @@ class MainWindow(QMainWindow):
         if self._settings.get("vault_backend") == "keyring":
             self._vault.unlock_with_keyring()
         self._password_save_bar = None
+        self._autofill_bar = None
 
         # Closed tabs stack (for Ctrl+Shift+T)
         self._closed_tabs = []
@@ -712,7 +714,7 @@ class MainWindow(QMainWindow):
         view.urlChanged.connect(partial(self._tab_url_changed, view))
         view.titleChanged.connect(partial(self._tab_title_changed, view))
         view.iconChanged.connect(partial(self._tab_icon_changed, view))
-        view.loadStarted.connect(self._load_started)
+        view.loadStarted.connect(partial(self._load_started, view))
         view.loadProgress.connect(self._load_progress)
         view.loadFinished.connect(self._load_finished)
         view.page().fullScreenRequested.connect(self._handle_fullscreen_request)
@@ -1058,12 +1060,16 @@ class MainWindow(QMainWindow):
     # Loading indicators
     # ------------------------------------------------------------------
 
-    def _load_started(self):
+    def _load_started(self, view=None):
         self._progress.setVisible(True)
         self._progress.setValue(0)
+        # Dismiss autofill bar on navigation
+        if self._autofill_bar:
+            self._autofill_bar._remove()
+            self._autofill_bar = None
         # Before navigating away, check if credentials were captured from a form submit
         if self._vault.is_unlocked:
-            self._harvest_submitted_credentials()
+            self._harvest_submitted_credentials(view)
 
     def _load_progress(self, progress):
         self._progress.setValue(progress)
@@ -1091,6 +1097,7 @@ class MainWindow(QMainWindow):
                     view.page().runJavaScript(get_fingerprint_resistance_js())
             if self._vault.is_unlocked:
                 self._check_page_for_passwords()
+                self._check_session_for_credentials()
             # Give the web view keyboard focus on new-tab so typing
             # reaches the page's keydown listener immediately.
             if view and view.url().scheme() == "shroud" and view.url().host() == "newtab":
@@ -2164,7 +2171,7 @@ class MainWindow(QMainWindow):
             self._status.showMessage("No login form found on this page", 3000)
 
     def _check_page_for_passwords(self):
-        """After page load, detect login forms: notify for autofill and inject submit interceptor."""
+        """After page load, detect login forms and watch for dynamically added ones."""
         view = self._current_view()
         if not view:
             return
@@ -2172,93 +2179,169 @@ class MainWindow(QMainWindow):
         if url.startswith("shroud:"):
             return
         # Inject JS that:
-        # 1. Counts visible password fields
-        # 2. Installs a submit interceptor to capture credentials
+        # 1. Defines the credential capture helpers and form-submit hooks
+        # 2. Installs them immediately if password fields exist
+        # 3. Uses a MutationObserver to install hooks when password fields
+        #    appear later (SPA / dynamically revealed login forms)
         js = """
         (function() {
-            var pwInputs = document.querySelectorAll('input[type="password"]');
-            var visible = 0;
-            pwInputs.forEach(function(i) { if (i.offsetParent !== null) visible++; });
+            if (window.__shroudPasswordObserver) return 0;
 
-            if (visible > 0 && !window.__shroudPasswordHooked) {
+            var __shroudAlert = window.alert.bind(window);
+            window.__shroudCapturedCreds = null;
+
+            function __shroudCapture(username, password) {
+                var creds = {
+                    username: username,
+                    password: password,
+                    url: window.location.href
+                };
+                window.__shroudCapturedCreds = creds;
+                try {
+                    sessionStorage.setItem('__shroud_creds', JSON.stringify(creds));
+                } catch(e) {}
+                try {
+                    __shroudAlert("__SHROUD_CRED_CAPTURE__:" + JSON.stringify(creds));
+                } catch(e) {}
+            }
+
+            function __shroudFindUsername(pw, scope) {
+                var inputs = Array.from(scope.querySelectorAll('input'));
+                var pwIdx = inputs.indexOf(pw);
+                for (var i = pwIdx - 1; i >= 0; i--) {
+                    var t = inputs[i].type;
+                    if ((t === 'text' || t === 'email' || t === '') && inputs[i].value) {
+                        return inputs[i].value;
+                    }
+                }
+                return '';
+            }
+
+            function __shroudInstallHooks() {
+                if (window.__shroudPasswordHooked) return;
+                var pwInputs = document.querySelectorAll('input[type="password"]');
+                var visible = 0;
+                pwInputs.forEach(function(i) { if (i.offsetParent !== null) visible++; });
+                if (visible === 0) return;
+
                 window.__shroudPasswordHooked = true;
-                window.__shroudCapturedCreds = null;
 
                 document.addEventListener('submit', function(e) {
                     var form = e.target;
                     var pw = form.querySelector('input[type="password"]');
                     if (!pw || !pw.value) return;
-
-                    // Find username field: closest text/email input before the password
-                    var inputs = Array.from(form.querySelectorAll('input'));
-                    var pwIdx = inputs.indexOf(pw);
-                    var username = '';
-                    for (var i = pwIdx - 1; i >= 0; i--) {
-                        var t = inputs[i].type;
-                        if ((t === 'text' || t === 'email' || t === '') && inputs[i].value) {
-                            username = inputs[i].value;
-                            break;
-                        }
-                    }
-                    window.__shroudCapturedCreds = {
-                        username: username,
-                        password: pw.value,
-                        url: window.location.href
-                    };
+                    __shroudCapture(__shroudFindUsername(pw, form), pw.value);
                 }, true);
 
-                // Also catch clicks on submit buttons outside <form> (SPA login flows)
                 document.addEventListener('click', function(e) {
-                    var btn = e.target.closest('button[type="submit"], input[type="submit"]');
+                    var btn = e.target.closest(
+                        'button, input[type="submit"], [role="button"]'
+                    );
                     if (!btn) return;
-                    var form = btn.closest('form');
-                    if (form) return;  // handled by submit event above
+                    if (btn.closest('form')) return;
 
-                    // Look for a nearby password field
                     var pwAll = document.querySelectorAll('input[type="password"]');
                     pwAll.forEach(function(pw) {
                         if (!pw.value) return;
                         var container = pw.closest('div, section, main, body');
                         if (!container) return;
-                        var inputs = Array.from(container.querySelectorAll('input'));
-                        var pwIdx = inputs.indexOf(pw);
-                        var username = '';
-                        for (var i = pwIdx - 1; i >= 0; i--) {
-                            var t = inputs[i].type;
-                            if ((t === 'text' || t === 'email' || t === '') && inputs[i].value) {
-                                username = inputs[i].value;
-                                break;
-                            }
-                        }
-                        if (pw.value) {
-                            window.__shroudCapturedCreds = {
-                                username: username,
-                                password: pw.value,
-                                url: window.location.href
-                            };
-                        }
+                        __shroudCapture(__shroudFindUsername(pw, container), pw.value);
                     });
                 }, true);
+
+                return visible;
             }
-            return visible;
+
+            // Try immediately
+            var found = __shroudInstallHooks();
+            if (found) return found;
+
+            // Watch for password fields appearing later
+            window.__shroudPasswordObserver = new MutationObserver(function() {
+                if (window.__shroudPasswordHooked) {
+                    window.__shroudPasswordObserver.disconnect();
+                    return;
+                }
+                if (__shroudInstallHooks()) {
+                    // Notify Python that password fields were found dynamically
+                    try { __shroudAlert("__SHROUD_PW_FIELDS_FOUND__"); } catch(e) {}
+                }
+            });
+            window.__shroudPasswordObserver.observe(document.documentElement, {
+                childList: true, subtree: true, attributes: true,
+                attributeFilter: ['type', 'style', 'class', 'hidden']
+            });
+            return 0;
         })();
         """
         view.page().runJavaScript(js, lambda count: self._on_password_fields_detected(count, url))
 
     def _on_password_fields_detected(self, count, url):
-        if not count or count <= 0:
-            return
-        entries = self._vault.get_entries_for_url(url)
-        if entries:
-            self._status.showMessage(
-                "Saved password available \u2014 press Ctrl+Shift+L to auto-fill", 5000
-            )
+        if count and count > 0:
+            self._offer_autofill_if_available(url)
 
-    def _harvest_submitted_credentials(self):
-        """Read credentials captured by the form submit interceptor."""
+    def _on_dynamic_password_fields_found(self):
+        """Called when the MutationObserver detects dynamically added password fields."""
         view = self._current_view()
+        if view:
+            self._offer_autofill_if_available(view.url().toString())
+
+    def _offer_autofill_if_available(self, url):
+        """Show an autofill bar if saved credentials exist for the given URL."""
+        entries = self._vault.get_entries_for_url(url)
+        if not entries:
+            return
+        entry = max(entries, key=lambda e: e.get("last_used", 0))
+        username = entry["username"] or "(no username)"
+
+        # Don't show if there's already a bar visible
+        if self._autofill_bar or self._password_save_bar:
+            return
+
+        def on_fill():
+            self._auto_fill_password()
+            self._autofill_bar = None
+
+        def on_dismiss():
+            self._autofill_bar = None
+
+        bar = AutofillBar(username, on_fill, on_dismiss, parent=self)
+        self._autofill_bar = bar
+        self._central_layout.insertWidget(0, bar)
+
+    def _check_session_for_credentials(self):
+        """After page load, check sessionStorage for creds saved by a previous page's form submit."""
+        view = self._current_view()
+        if not view or view.url().toString().startswith("shroud:"):
+            return
+        js = """
+        (function() {
+            try {
+                var c = sessionStorage.getItem('__shroud_creds');
+                if (c) {
+                    sessionStorage.removeItem('__shroud_creds');
+                    return JSON.parse(c);
+                }
+            } catch(e) {}
+            return null;
+        })();
+        """
+        view.page().runJavaScript(js, self._on_credentials_harvested)
+
+    def _harvest_submitted_credentials(self, view=None):
+        """Read credentials captured by the form submit interceptor."""
+        if view is None:
+            view = self._current_view()
         if not view:
             return
+        page = view.page()
+        # Primary: check creds stored via javaScriptAlert override (reliable)
+        creds = getattr(page, '_pending_creds', None)
+        if creds:
+            page._pending_creds = None
+            self._on_credentials_harvested(creds)
+            return
+        # Fallback: async JS read (may fail during cross-origin navigation)
         js = """
         (function() {
             var c = window.__shroudCapturedCreds;
@@ -2267,6 +2350,16 @@ class MainWindow(QMainWindow):
         })();
         """
         view.page().runJavaScript(js, self._on_credentials_harvested)
+
+    def _harvest_pending_creds(self, view):
+        """Timer callback for SPA logins that don't trigger navigation."""
+        if not self._vault.is_unlocked or not view:
+            return
+        page = view.page()
+        creds = getattr(page, '_pending_creds', None)
+        if creds:
+            page._pending_creds = None
+            self._on_credentials_harvested(creds)
 
     def _on_credentials_harvested(self, creds):
         if not creds or not isinstance(creds, dict):
@@ -2988,7 +3081,7 @@ class MainWindow(QMainWindow):
         view.urlChanged.connect(partial(self._tab_url_changed, view))
         view.titleChanged.connect(partial(self._tab_title_changed, view))
         view.iconChanged.connect(partial(self._tab_icon_changed, view))
-        view.loadStarted.connect(self._load_started)
+        view.loadStarted.connect(partial(self._load_started, view))
         view.loadProgress.connect(self._load_progress)
         view.loadFinished.connect(self._load_finished)
         view.page().fullScreenRequested.connect(self._handle_fullscreen_request)

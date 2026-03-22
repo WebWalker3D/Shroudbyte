@@ -1,5 +1,6 @@
 """Custom WebEngineView and WebEnginePage with context menus, HTTPS-only, and popup support."""
 
+import json
 import ssl
 import urllib.request
 
@@ -13,6 +14,8 @@ from PyQt6.QtWebEngineCore import (
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import QApplication, QDialog, QMenu, QVBoxLayout
 
+_CRED_ALERT_PREFIX = "__SHROUD_CRED_CAPTURE__:"
+_PW_FOUND_ALERT = "__SHROUD_PW_FIELDS_FOUND__"
 
 # Shared set of hosts known NOT to require HTTP auth.
 # Populated on successful HEAD checks; avoids repeat probes.
@@ -30,7 +33,29 @@ class ShroudPage(QWebEnginePage):
         super().__init__(profile, parent)
         self._view_ref = None
         self.https_only = False
+        self._pending_creds = None
         self.featurePermissionRequested.connect(self._on_permission_requested)
+
+    def javaScriptAlert(self, securityOrigin, msg):
+        """Intercept credential-capture and password-field alerts from injected hooks."""
+        if msg.startswith(_CRED_ALERT_PREFIX):
+            try:
+                self._pending_creds = json.loads(msg[len(_CRED_ALERT_PREFIX):])
+                mw = self._get_main_window()
+                if mw:
+                    from PyQt6.QtCore import QTimer
+                    view = self._view_ref
+                    QTimer.singleShot(2000, lambda: mw._harvest_pending_creds(view))
+            except Exception:
+                pass
+            return
+        if msg == _PW_FOUND_ALERT:
+            mw = self._get_main_window()
+            if mw:
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(0, lambda: mw._on_dynamic_password_fields_found())
+            return
+        super().javaScriptAlert(securityOrigin, msg)
 
     def createWindow(self, window_type):
         view = self._view_ref
