@@ -739,6 +739,22 @@ class MainWindow(QMainWindow):
             self._update_reader_btn()
 
     def _tab_url_changed(self, view, url):
+        # Handle newtab search handoff: the JS sets the hash to
+        # "navigate:<url>" to signal us to navigate via the URL bar,
+        # avoiding Chromium's local-scheme network restrictions.
+        # We must open a NEW tab because the shroud:// renderer process
+        # doesn't have SOCKS proxy access.
+        if url.scheme() == "shroud" and url.hasFragment():
+            frag = url.fragment()
+            if frag.startswith("navigate:"):
+                target = frag[len("navigate:"):]
+                if target:
+                    idx = self._tabs.indexOf(view)
+                    self.add_new_tab(QUrl(target))
+                    if idx >= 0:
+                        self._close_tab(idx)
+                return
+
         if view == self._current_view():
             self._update_url_bar(url)
             self._update_bookmark_btn(url)

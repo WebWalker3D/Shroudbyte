@@ -345,15 +345,20 @@ def generate_new_tab_html():
         || q.startsWith('localhost')
         || q.startsWith('127.0.0.1')
         || q.startsWith('[::1]');
+      var dest;
       if (looksLikeUrl) {{
         if (!hasScheme) {{
           q = (q.indexOf('.') !== -1 ? 'https://' : 'http://') + q;
         }}
-        window.location.href = q;
+        dest = q;
       }} else {{
         var searchUrl = "{search_url}";
-        window.location.href = searchUrl.replace("{{}}", encodeURIComponent(q));
+        dest = searchUrl.replace("{{}}", encodeURIComponent(q));
       }}
+      // Signal the browser to navigate via the URL bar.
+      // Direct window.location.href from a shroud:// page is blocked
+      // by Chromium's local-scheme network restrictions.
+      window.location.hash = "navigate:" + dest;
     }}
     </script>
 

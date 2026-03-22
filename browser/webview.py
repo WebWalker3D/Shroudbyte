@@ -105,21 +105,29 @@ class ShroudPage(QWebEnginePage):
 
         # Chromium blocks raw loopback IPs through a proxy — rewrite to
         # "localhost" which is excluded from proxy and resolves the same.
-        # Guard against re-entry: only rewrite if host is still an IP.
         if is_main_frame and host in self._LOOPBACK_IPS:
             rewritten = QUrl(url)
             rewritten.setHost("localhost")
-            # Use QTimer.singleShot to break out of the navigation call stack
-            # and avoid re-entrant setUrl inside acceptNavigationRequest.
             QTimer.singleShot(0, lambda u=rewritten: self.setUrl(u))
             return False
 
-        # Chromium blocks network requests originating from local schemes
-        # (shroud://) to external origins.  Re-issue the navigation as a
-        # browser-level load so it is not subject to the local-scheme
-        # network restriction.
-        if is_main_frame and self.url().scheme() == "shroud" and url.scheme() in ("http", "https"):
-            QTimer.singleShot(0, lambda u=QUrl(url): self.setUrl(u))
+        # Chromium's shroud:// renderer process lacks SOCKS proxy access.
+        # Allow URL bar / view.load() (NavigationTypeTyped) through.
+        # For everything else (link clicks, JS), open in a fresh tab.
+        if (is_main_frame
+                and self.url().scheme() == "shroud"
+                and url.scheme() in ("http", "https")
+                and nav_type != QWebEnginePage.NavigationType.NavigationTypeTyped):
+            mw = self._get_main_window()
+            if mw:
+                view_ref = self._view_ref
+                target = QUrl(url)
+                def _open():
+                    mw.add_new_tab(target)
+                    idx = mw._tabs.indexOf(view_ref)
+                    if idx >= 0:
+                        mw._close_tab(idx)
+                QTimer.singleShot(0, _open)
             return False
 
         # ── HTTP 401 pre-check ──────────────────────────────────────
