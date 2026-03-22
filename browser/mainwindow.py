@@ -12,6 +12,7 @@ from PyQt6.QtWebEngineCore import (
     QWebEnginePage, QWebEngineProfile, QWebEngineScript, QWebEngineSettings,
 )
 from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
+from .reader import READER_EXTRACT_JS, generate_reader_html
 from PyQt6.QtWidgets import (
     QApplication,
     QCompleter,
@@ -335,6 +336,11 @@ class MainWindow(QMainWindow):
         self._bookmark_btn.setStyleSheet(style.BOOKMARK_BTN_STYLE)
         self._bookmark_btn.clicked.connect(self._toggle_bookmark)
 
+        self._reader_btn = QPushButton("Aa")
+        self._reader_btn.setToolTip("Reader Mode (F9)")
+        self._reader_btn.setStyleSheet(style.NAV_BTN_STYLE)
+        self._reader_btn.clicked.connect(self._toggle_reader_mode)
+
         self._new_tab_btn = QPushButton("+")
         self._new_tab_btn.setToolTip("New Tab (Ctrl+T)")
         self._new_tab_btn.setStyleSheet(style.NEW_TAB_BTN_STYLE)
@@ -342,7 +348,8 @@ class MainWindow(QMainWindow):
 
         for w in [
             self._back_btn, self._forward_btn, self._reload_btn,
-            self._home_btn, self._url_bar, self._bookmark_btn, self._new_tab_btn,
+            self._home_btn, self._url_bar, self._bookmark_btn,
+            self._reader_btn, self._new_tab_btn,
         ]:
             self._navbar.addWidget(w)
 
@@ -432,6 +439,8 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self._make_action("Reset Zoom", self._zoom_reset, "Ctrl+0"))
         view_menu.addSeparator()
         view_menu.addAction(self._make_action("Full Screen", self._toggle_fullscreen, "F11"))
+        view_menu.addSeparator()
+        view_menu.addAction(self._make_action("Reader Mode", self._toggle_reader_mode, "F9"))
         view_menu.addSeparator()
         view_menu.addAction(self._make_action("View Source", self._view_source, "Ctrl+U"))
 
@@ -619,6 +628,7 @@ class MainWindow(QMainWindow):
             self._update_url_bar(view.url())
             self._update_title(view.title())
             self._update_bookmark_btn(view.url())
+            self._update_reader_btn()
 
     def _tab_url_changed(self, view, url):
         if view == self._current_view():
@@ -693,6 +703,60 @@ class MainWindow(QMainWindow):
         else:
             self.add_new_tab()
 
+    # ------------------------------------------------------------------
+    # Reader mode
+    # ------------------------------------------------------------------
+
+    def _toggle_reader_mode(self):
+        view = self._current_view()
+        if not view:
+            return
+        url = view.url().toString()
+        if url.startswith("shroud:"):
+            return
+
+        if getattr(view, '_reader_mode_active', False):
+            # Exit reader mode — reload original page
+            view._reader_mode_active = False
+            original_url = getattr(view, '_reader_mode_url', url)
+            view.load(QUrl(original_url))
+            self._update_reader_btn()
+        else:
+            # Enter reader mode — extract article content
+            view._reader_mode_url = url
+            target_view = view
+            view.page().runJavaScript(
+                READER_EXTRACT_JS,
+                lambda result, v=target_view: self._on_reader_extract(result, v),
+            )
+
+    def _on_reader_extract(self, result, target_view):
+        view = self._current_view()
+        if view is not target_view:
+            return
+        if not result or not isinstance(result, dict) or not result.get('content'):
+            self._status.showMessage("Could not extract article content", 3000)
+            return
+
+        original_url = getattr(view, '_reader_mode_url', view.url().toString())
+        reader_html = generate_reader_html(
+            title=result.get('title', ''),
+            byline=result.get('byline', ''),
+            content=result.get('content', ''),
+            site_name=result.get('siteName', ''),
+            original_url=original_url,
+        )
+        view._reader_mode_active = True
+        view.page().setHtml(reader_html, QUrl(original_url))
+        self._update_reader_btn()
+
+    def _update_reader_btn(self):
+        view = self._current_view()
+        if view and getattr(view, '_reader_mode_active', False):
+            self._reader_btn.setStyleSheet(style.READER_BTN_ACTIVE_STYLE)
+        else:
+            self._reader_btn.setStyleSheet(style.NAV_BTN_STYLE)
+
     def _update_url_bar(self, url):
         if url.scheme() == "shroud" and url.host() == "newtab":
             self._url_bar.setText("")
@@ -751,7 +815,9 @@ class MainWindow(QMainWindow):
         self._update_adblock_label()
         if ok:
             view = self._current_view()
-            if view and not view.url().toString().startswith("shroud:"):
+            if view and getattr(view, '_reader_mode_active', False):
+                pass  # Reader mode page — skip content injection
+            elif view and not view.url().toString().startswith("shroud:"):
                 # Inject cosmetic CSS (ad hiding + cookie banners)
                 if self._cosmetic_css and self._settings.get("enable_adblock", True):
                     css_js = "var s=document.createElement('style');" \

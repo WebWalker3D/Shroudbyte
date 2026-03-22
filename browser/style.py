@@ -276,6 +276,27 @@ NEW_TAB_BTN_STYLE = f"""
     }}
 """
 
+READER_BTN_ACTIVE_STYLE = f"""
+    QPushButton {{
+        font-size: 13px;
+        font-weight: 600;
+        min-width: 34px;
+        max-width: 34px;
+        min-height: 34px;
+        max-height: 34px;
+        border: none;
+        border-radius: 8px;
+        background: {ACCENT};
+        color: {BG_DARK};
+    }}
+    QPushButton:hover {{
+        background: {ACCENT_HOVER};
+    }}
+    QPushButton:pressed {{
+        background: #b87a5a;
+    }}
+"""
+
 DIALOG_BTN_STYLE = f"""
     QPushButton {{
         padding: 9px 22px;
