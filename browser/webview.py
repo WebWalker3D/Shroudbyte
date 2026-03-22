@@ -19,6 +19,8 @@ _PW_FOUND_ALERT = "__SHROUD_PW_FIELDS_FOUND__"
 _LINK_HOVER_PREFIX = "__SHROUD_LINK_HOVER__:"
 _PRIVACY_ACTION_PREFIX = "__SHROUD_PRIVACY__:"
 _WATCH_ACTION_PREFIX = "__SHROUD_WATCH__:"
+_SETTINGS_ACTION_PREFIX = "__SHROUD_SETTINGS__:"
+_PAGE_ACT_PREFIX = "__SHROUD_PAGE_ACT__:"
 
 # Shared set of hosts known NOT to require HTTP auth.
 # Populated on successful HEAD checks; avoids repeat probes.
@@ -91,6 +93,26 @@ class ShroudPage(QWebEnginePage):
                 mw = self._get_main_window()
                 if mw and hasattr(mw, "_handle_watch_action"):
                     mw._handle_watch_action(data)
+            except Exception:
+                pass
+            return
+        if message.startswith(_SETTINGS_ACTION_PREFIX):
+            try:
+                import json as _json
+                data = _json.loads(message[len(_SETTINGS_ACTION_PREFIX):])
+                mw = self._get_main_window()
+                if mw and hasattr(mw, "_handle_settings_action"):
+                    mw._handle_settings_action(data, self._view_ref)
+            except Exception:
+                pass
+            return
+        if message.startswith(_PAGE_ACT_PREFIX):
+            try:
+                import json as _json
+                data = _json.loads(message[len(_PAGE_ACT_PREFIX):])
+                mw = self._get_main_window()
+                if mw and hasattr(mw, "_handle_page_action"):
+                    mw._handle_page_action(data)
             except Exception:
                 pass
             return

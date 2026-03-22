@@ -12,7 +12,8 @@ from . import __app_name__, __version__
 from .newtab import generate_new_tab_html
 from . import storage
 from .style import (
-    ACCENT, ACCENT_HOVER, ACCENT_TEXT, BG_DARK, BG_CARD, BG_MID,
+    ACCENT, ACCENT_HOVER, ACCENT_TEXT,
+    BG_DARK, BG_CARD, BG_MID, BG_HOVER, BG_ACTIVE,
     TEXT, TEXT_DIM, TEXT_FAINT, BORDER, GREEN, RED, YELLOW,
 )
 
@@ -33,6 +34,9 @@ def register_shroud_scheme():
 # Available internal pages (name -> description).
 _PAGES = {
     "newtab": "New Tab",
+    "settings": "Settings",
+    "bookmarks": "Bookmarks",
+    "history": "History",
     "privacy": "Privacy Dashboard",
     "watches": "Page Watches",
     "about": "About Shroudbyte",
@@ -53,6 +57,14 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
 
         if host == "newtab":
             html = generate_new_tab_html()
+        elif host == "settings":
+            html = self._page_settings()
+        elif host == "bookmarks":
+            html = self._page_bookmarks()
+        elif host == "history":
+            html = self._page_history()
+        elif host == "source":
+            html = self._page_source()
         elif host == "privacy":
             html = self._page_privacy()
         elif host == "watches":
@@ -69,7 +81,731 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         buf.open(QIODevice.OpenModeFlag.ReadOnly)
         job.reply(b"text/html", buf)
 
+    @staticmethod
+    def _json_encode(s):
+        import json
+        return json.dumps(s)
+
     # ── Page generators ──────────────────────────────────────────
+
+    def _page_bookmarks(self):
+        """Generate the shroud://bookmarks page."""
+        bookmarks = storage.load_bookmarks()
+
+        rows = ""
+        for bm in bookmarks:
+            esc_url = html_mod.escape(bm.get("url", ""))
+            esc_title = html_mod.escape(bm.get("title", esc_url)[:80])
+            rows += f"""
+      <div class="entry">
+        <a href="{esc_url}" class="entry-link">
+          <div class="entry-title">{esc_title}</div>
+          <div class="entry-url">{esc_url}</div>
+        </a>
+        <button class="act-btn danger" onclick="pageAct('del_bookmark','{esc_url}')">Delete</button>
+      </div>"""
+
+        if not bookmarks:
+            rows = '<div class="empty">No bookmarks yet. Press Ctrl+D to bookmark a page.</div>'
+
+        page_links = "\n      ".join(
+            f'<a href="shroud://{n}">shroud://{n}</a>' for n in _PAGES
+        )
+
+        return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Bookmarks &mdash; {__app_name__}</title>
+<style>
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{
+    background: {BG_DARK}; color: {TEXT};
+    font-family: 'Cantarell', 'Noto Sans', system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding-top: 8vh; padding-bottom: 8vh;
+  }}
+  .bg-glow {{
+    position: fixed; top: 14%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 800px; height: 500px;
+    background: radial-gradient(ellipse, rgba(205, 141, 106, 0.04) 0%, transparent 65%);
+    pointer-events: none; z-index: 0;
+  }}
+  .content {{
+    position: relative; z-index: 2;
+    display: flex; flex-direction: column; align-items: center;
+    width: 100%; max-width: 680px; padding: 0 24px;
+  }}
+  .wordmark {{
+    font-size: 28px; font-weight: 700;
+    letter-spacing: 6px; text-transform: uppercase; text-indent: 6px;
+    background: linear-gradient(135deg, {ACCENT_HOVER} 0%, {ACCENT} 35%, {ACCENT_TEXT} 65%, {ACCENT} 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    margin-bottom: 6px; user-select: none;
+  }}
+  .subtitle {{ font-size: 11px; color: {TEXT_FAINT}; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 32px; }}
+  .card {{
+    width: 100%; background: {BG_CARD}; border: 1px solid {BORDER};
+    border-radius: 12px; padding: 4px 0; margin-bottom: 24px; overflow: hidden;
+  }}
+  .entry {{
+    display: flex; align-items: center; padding: 10px 18px; gap: 12px;
+  }}
+  .entry + .entry {{ border-top: 1px solid {BORDER}; }}
+  .entry-link {{
+    flex: 1; min-width: 0; text-decoration: none;
+    transition: opacity 0.15s;
+  }}
+  .entry-link:hover {{ opacity: 0.8; }}
+  .entry-title {{ font-size: 13px; color: {TEXT}; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+  .entry-url {{ font-size: 11px; color: {TEXT_FAINT}; font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+  .act-btn {{
+    padding: 4px 12px; font-size: 11px; font-weight: 500;
+    border: 1px solid {BORDER}; border-radius: 5px;
+    background: {BG_MID}; color: {TEXT_DIM}; cursor: pointer;
+    font-family: inherit; flex-shrink: 0;
+  }}
+  .act-btn:hover {{ background: {ACCENT}; border-color: {ACCENT}; color: {BG_DARK}; }}
+  .act-btn.danger {{ border-color: {RED}; color: {RED}; background: transparent; }}
+  .act-btn.danger:hover {{ background: {RED}; color: {BG_DARK}; }}
+  .empty {{ text-align: center; padding: 40px 20px; color: {TEXT_FAINT}; font-size: 14px; }}
+  .stat {{ font-size: 12px; color: {TEXT_DIM}; margin-bottom: 16px; }}
+  .footer {{ margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }}
+  .footer a {{ padding: 8px 16px; background: rgba(28,27,36,0.6); border: 1px solid rgba(40,38,51,0.5); border-radius: 8px; text-decoration: none; color: {ACCENT}; font-size: 13px; font-family: 'JetBrains Mono', monospace; transition: all 0.2s; }}
+  .footer a:hover {{ background: rgba(38,36,48,0.85); border-color: rgba(205,141,106,0.3); transform: translateY(-1px); }}
+  @keyframes fadeIn {{ from {{ opacity: 0; transform: translateY(10px); }} to {{ opacity: 1; transform: translateY(0); }} }}
+  .wordmark {{ animation: fadeIn 0.5s ease 0.04s both; }}
+  .subtitle {{ animation: fadeIn 0.5s ease 0.10s both; }}
+  .card {{ animation: fadeIn 0.5s ease 0.18s both; }}
+</style>
+</head>
+<body>
+  <div class="bg-glow"></div>
+  <div class="content">
+    <div class="wordmark">Bookmarks</div>
+    <div class="subtitle">{len(bookmarks)} saved</div>
+    <div class="card">{rows}</div>
+    <div class="footer">{page_links}</div>
+  </div>
+  <script>
+    function pageAct(action, arg) {{
+      console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify({{action:action,arg:arg}}));
+      setTimeout(function(){{ location.reload(); }}, 200);
+    }}
+  </script>
+</body>
+</html>"""
+
+    def _page_history(self):
+        """Generate the shroud://history page with client-side filtering."""
+        import time as _time
+        history = storage.load_history()
+
+        rows_js = []
+        for h in history[:2000]:
+            ts = _time.strftime("%Y-%m-%d %H:%M", _time.localtime(h.get("visited", 0)))
+            esc_url = html_mod.escape(h.get("url", ""))
+            esc_title = html_mod.escape(h.get("title", "")[:80])
+            rows_js.append(
+                f'{{"t":"{esc_title}","u":"{esc_url}","d":"{ts}"}}'
+            )
+
+        history_json = "[" + ",\n".join(rows_js) + "]"
+
+        page_links = "\n      ".join(
+            f'<a href="shroud://{n}">shroud://{n}</a>' for n in _PAGES
+        )
+
+        return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>History &mdash; {__app_name__}</title>
+<style>
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{
+    background: {BG_DARK}; color: {TEXT};
+    font-family: 'Cantarell', 'Noto Sans', system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding-top: 8vh; padding-bottom: 8vh;
+  }}
+  .bg-glow {{
+    position: fixed; top: 14%; left: 50%; transform: translate(-50%, -50%);
+    width: 800px; height: 500px;
+    background: radial-gradient(ellipse, rgba(205, 141, 106, 0.04) 0%, transparent 65%);
+    pointer-events: none; z-index: 0;
+  }}
+  .content {{
+    position: relative; z-index: 2;
+    display: flex; flex-direction: column; align-items: center;
+    width: 100%; max-width: 680px; padding: 0 24px;
+  }}
+  .wordmark {{
+    font-size: 28px; font-weight: 700; letter-spacing: 6px;
+    text-transform: uppercase; text-indent: 6px;
+    background: linear-gradient(135deg, {ACCENT_HOVER} 0%, {ACCENT} 35%, {ACCENT_TEXT} 65%, {ACCENT} 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    margin-bottom: 6px; user-select: none;
+  }}
+  .subtitle {{ font-size: 11px; color: {TEXT_FAINT}; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 24px; }}
+  .search {{
+    width: 100%; padding: 10px 16px; font-size: 14px;
+    background: {BG_CARD}; color: {TEXT}; border: 1px solid {BORDER};
+    border-radius: 10px; margin-bottom: 16px; font-family: inherit;
+  }}
+  .search:focus {{ border-color: {ACCENT}; outline: none; }}
+  .actions-bar {{
+    display: flex; justify-content: flex-end; width: 100%; margin-bottom: 12px;
+  }}
+  .card {{
+    width: 100%; background: {BG_CARD}; border: 1px solid {BORDER};
+    border-radius: 12px; padding: 4px 0; margin-bottom: 24px; overflow: hidden;
+    max-height: 70vh; overflow-y: auto;
+  }}
+  .entry {{
+    display: flex; align-items: center; padding: 8px 18px; gap: 12px;
+  }}
+  .entry + .entry {{ border-top: 1px solid {BORDER}; }}
+  .entry-link {{
+    flex: 1; min-width: 0; text-decoration: none;
+  }}
+  .entry-link:hover .entry-title {{ color: {ACCENT}; }}
+  .entry-title {{ font-size: 13px; color: {TEXT}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.15s; }}
+  .entry-url {{ font-size: 10px; color: {TEXT_FAINT}; font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+  .entry-date {{ font-size: 10px; color: {TEXT_FAINT}; flex-shrink: 0; }}
+  .act-btn {{
+    padding: 4px 12px; font-size: 11px; font-weight: 500;
+    border: 1px solid {BORDER}; border-radius: 5px;
+    background: {BG_MID}; color: {TEXT_DIM}; cursor: pointer;
+    font-family: inherit;
+  }}
+  .act-btn:hover {{ background: {ACCENT}; border-color: {ACCENT}; color: {BG_DARK}; }}
+  .act-btn.danger {{ border-color: {RED}; color: {RED}; background: transparent; }}
+  .act-btn.danger:hover {{ background: {RED}; color: {BG_DARK}; }}
+  .empty {{ text-align: center; padding: 40px 20px; color: {TEXT_FAINT}; font-size: 14px; }}
+  .footer {{ margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }}
+  .footer a {{ padding: 8px 16px; background: rgba(28,27,36,0.6); border: 1px solid rgba(40,38,51,0.5); border-radius: 8px; text-decoration: none; color: {ACCENT}; font-size: 13px; font-family: 'JetBrains Mono', monospace; transition: all 0.2s; }}
+  .footer a:hover {{ background: rgba(38,36,48,0.85); border-color: rgba(205,141,106,0.3); transform: translateY(-1px); }}
+  @keyframes fadeIn {{ from {{ opacity: 0; transform: translateY(10px); }} to {{ opacity: 1; transform: translateY(0); }} }}
+  .wordmark {{ animation: fadeIn 0.5s ease 0.04s both; }}
+  .card {{ animation: fadeIn 0.5s ease 0.18s both; }}
+</style>
+</head>
+<body>
+  <div class="bg-glow"></div>
+  <div class="content">
+    <div class="wordmark">History</div>
+    <div class="subtitle">{len(history)} entries</div>
+    <input class="search" type="text" placeholder="Filter history..." oninput="filterHistory(this.value)">
+    <div class="actions-bar">
+      <button class="act-btn danger" onclick="if(confirm('Clear all history?'))pageAct('clear_history','')">Clear All History</button>
+    </div>
+    <div class="card" id="historyList"></div>
+    <div class="footer">{page_links}</div>
+  </div>
+  <script>
+    var _history = {history_json};
+
+    function esc(s) {{ var d = document.createElement('span'); d.textContent = s; return d.innerHTML; }}
+
+    function renderHistory(items) {{
+      var el = document.getElementById('historyList');
+      if (!items.length) {{ el.innerHTML = '<div class="empty">No matching history.</div>'; return; }}
+      var h = '';
+      for (var i = 0; i < items.length && i < 500; i++) {{
+        var e = items[i];
+        h += '<div class="entry">' +
+          '<a class="entry-link" href="' + e.u + '">' +
+          '<div class="entry-title">' + esc(e.t || e.u) + '</div>' +
+          '<div class="entry-url">' + esc(e.u) + '</div></a>' +
+          '<span class="entry-date">' + e.d + '</span></div>';
+      }}
+      el.innerHTML = h;
+    }}
+
+    function filterHistory(q) {{
+      if (!q) {{ renderHistory(_history); return; }}
+      var lq = q.toLowerCase();
+      renderHistory(_history.filter(function(e) {{
+        return (e.t && e.t.toLowerCase().indexOf(lq) !== -1) ||
+               (e.u && e.u.toLowerCase().indexOf(lq) !== -1);
+      }}));
+    }}
+
+    function pageAct(action, arg) {{
+      console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify({{action:action,arg:arg}}));
+      setTimeout(function(){{ location.reload(); }}, 200);
+    }}
+
+    renderHistory(_history);
+  </script>
+</body>
+</html>"""
+
+    def _page_source(self):
+        """Generate the shroud://source page with the stored HTML source."""
+        mw = self.parent()
+        source = getattr(mw, "_pending_source_html", "") or ""
+        source_url = getattr(mw, "_pending_source_url", "") or ""
+        esc_source = html_mod.escape(source)
+        esc_url = html_mod.escape(source_url)
+
+        return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Source &mdash; {esc_url or __app_name__}</title>
+<style>
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{
+    background: {BG_DARK}; color: {TEXT};
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 13px;
+  }}
+  .toolbar {{
+    position: sticky; top: 0; z-index: 10;
+    background: {BG_MID}; border-bottom: 1px solid {BORDER};
+    padding: 8px 16px; display: flex; align-items: center; gap: 12px;
+  }}
+  .toolbar-url {{
+    font-size: 11px; color: {TEXT_DIM}; flex: 1;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }}
+  .toolbar-stat {{ font-size: 11px; color: {TEXT_FAINT}; }}
+  pre {{
+    padding: 16px; margin: 0;
+    color: {GREEN}; line-height: 1.5;
+    white-space: pre-wrap; word-wrap: break-word;
+    counter-reset: line;
+  }}
+  pre span {{
+    display: block;
+    counter-increment: line;
+  }}
+  pre span::before {{
+    content: counter(line);
+    display: inline-block;
+    width: 4em;
+    margin-right: 16px;
+    text-align: right;
+    color: {TEXT_FAINT};
+    user-select: none;
+  }}
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <div class="toolbar-url">{esc_url}</div>
+    <div class="toolbar-stat">{len(source)} chars &middot; {source.count(chr(10))+1} lines</div>
+  </div>
+  <pre id="src"></pre>
+  <script>
+    var src = {self._json_encode(source)};
+    var pre = document.getElementById('src');
+    var lines = src.split('\\n');
+    for (var i = 0; i < lines.length; i++) {{
+      var span = document.createElement('span');
+      span.textContent = lines[i];
+      pre.appendChild(span);
+    }}
+  </script>
+</body>
+</html>"""
+
+    def _page_settings(self):
+        """Generate the shroud://settings page."""
+        mw = self.parent()
+        settings = getattr(mw, "_settings", {})
+
+        # Check DNS registration state
+        dns_secret = storage.get_dns_secret(settings)
+        is_dns_registered = bool(dns_secret)
+        dns_status_color = GREEN if is_dns_registered else TEXT_FAINT
+        dns_status_text = "Registered" if is_dns_registered else "Not registered"
+
+        def _chk(key, default=False):
+            return "checked" if settings.get(key, default) else ""
+
+        page_links = "\n      ".join(
+            f'<a href="shroud://{name}">shroud://{name}</a>'
+            for name in _PAGES
+        )
+
+        doh_val = settings.get("dns_over_https", "automatic")
+        doh_options = "".join(
+            f'<option value="{v}"{" selected" if v == doh_val else ""}>{v}</option>'
+            for v in ("off", "automatic", "secure")
+        )
+
+        dns_disabled = "disabled" if is_dns_registered else ""
+        dns_server_readonly = "readonly" if is_dns_registered else ""
+        reg_btn_text = "Unregister" if is_dns_registered else "Register"
+        reg_btn_action = "unregister" if is_dns_registered else "register"
+
+        return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Settings &mdash; {__app_name__}</title>
+<style>
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{
+    background: {BG_DARK}; color: {TEXT};
+    font-family: 'Cantarell', 'Noto Sans', system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding-top: 8vh; padding-bottom: 8vh;
+  }}
+  .bg-glow {{
+    position: fixed; top: 14%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 800px; height: 500px;
+    background: radial-gradient(ellipse, rgba(205, 141, 106, 0.04) 0%, transparent 65%);
+    pointer-events: none; z-index: 0;
+  }}
+  .content {{
+    position: relative; z-index: 2;
+    display: flex; flex-direction: column; align-items: center;
+    width: 100%; max-width: 600px; padding: 0 24px;
+  }}
+  .wordmark {{
+    font-size: 28px; font-weight: 700;
+    letter-spacing: 6px; text-transform: uppercase; text-indent: 6px;
+    background: linear-gradient(
+      135deg, {ACCENT_HOVER} 0%, {ACCENT} 35%, {ACCENT_TEXT} 65%, {ACCENT} 100%
+    );
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    margin-bottom: 6px; user-select: none;
+  }}
+  .subtitle {{
+    font-size: 11px; color: {TEXT_FAINT};
+    letter-spacing: 3px; text-transform: uppercase;
+    margin-bottom: 32px;
+  }}
+  .section {{ width: 100%; margin-bottom: 20px; }}
+  .section h2 {{
+    font-size: 11px; text-transform: uppercase;
+    letter-spacing: 3px; color: {TEXT_FAINT};
+    font-weight: 600; margin-bottom: 10px; padding-left: 4px;
+  }}
+  .card {{
+    width: 100%; background: {BG_CARD};
+    border: 1px solid {BORDER}; border-radius: 12px;
+    padding: 6px 20px; overflow: hidden;
+  }}
+  .row {{
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 0; gap: 16px;
+  }}
+  .row + .row {{ border-top: 1px solid {BORDER}; }}
+  .row-label {{
+    font-size: 13px; color: {TEXT_DIM}; min-width: 160px; flex-shrink: 0;
+  }}
+  .row-hint {{
+    font-size: 10px; color: {TEXT_FAINT}; margin-top: 2px;
+  }}
+  input[type="text"], input[type="number"], select {{
+    padding: 8px 12px; font-size: 13px;
+    background: {BG_DARK}; color: {TEXT};
+    border: 1px solid {BORDER}; border-radius: 8px;
+    font-family: inherit; flex: 1; min-width: 0;
+  }}
+  input[type="text"]:focus, input[type="number"]:focus, select:focus {{
+    border-color: {ACCENT}; outline: none;
+  }}
+  input[type="text"]:read-only {{
+    opacity: 0.5; cursor: not-allowed;
+  }}
+  select {{ cursor: pointer; }}
+  select option {{ background: {BG_CARD}; color: {TEXT}; }}
+
+  /* Toggle switch */
+  .toggle {{ position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }}
+  .toggle input {{ opacity: 0; width: 0; height: 0; }}
+  .toggle .slider {{
+    position: absolute; cursor: pointer; inset: 0;
+    background: {BG_ACTIVE}; border-radius: 22px;
+    transition: 0.2s;
+  }}
+  .toggle .slider:before {{
+    content: ""; position: absolute;
+    height: 16px; width: 16px; left: 3px; bottom: 3px;
+    background: {TEXT_FAINT}; border-radius: 50%;
+    transition: 0.2s;
+  }}
+  .toggle input:checked + .slider {{ background: {ACCENT}; }}
+  .toggle input:checked + .slider:before {{
+    transform: translateX(18px); background: {BG_DARK};
+  }}
+
+  .save-bar {{
+    position: sticky; bottom: 0;
+    width: 100%; padding: 16px 0;
+    display: flex; justify-content: center; gap: 12px;
+    background: linear-gradient(transparent, {BG_DARK} 30%);
+  }}
+  .btn {{
+    padding: 10px 28px; font-size: 13px; font-weight: 600;
+    border: none; border-radius: 8px; cursor: pointer;
+    font-family: inherit; transition: all 0.15s ease;
+  }}
+  .btn-primary {{
+    background: {ACCENT}; color: {BG_DARK};
+  }}
+  .btn-primary:hover {{ background: {ACCENT_HOVER}; }}
+  .btn-secondary {{
+    background: {BG_CARD}; color: {TEXT};
+    border: 1px solid {BORDER};
+  }}
+  .btn-secondary:hover {{ background: {BG_HOVER}; border-color: {ACCENT}; }}
+  .btn-danger {{
+    background: transparent; color: {RED};
+    border: 1px solid {RED};
+  }}
+  .btn-danger:hover {{ background: {RED}; color: {BG_DARK}; }}
+  .btn:disabled {{ opacity: 0.4; cursor: not-allowed; }}
+  .dns-status {{
+    font-size: 11px; padding: 4px 10px;
+    border-radius: 4px;
+  }}
+  .dns-row {{ display: flex; gap: 8px; align-items: center; flex: 1; min-width: 0; }}
+  .toast {{
+    position: fixed; bottom: 24px; left: 50%;
+    transform: translateX(-50%);
+    padding: 10px 24px; border-radius: 8px;
+    background: {BG_CARD}; border: 1px solid {GREEN};
+    color: {GREEN}; font-size: 13px;
+    opacity: 0; transition: opacity 0.3s ease;
+    z-index: 100; pointer-events: none;
+  }}
+  .toast.visible {{ opacity: 1; }}
+  .toast.error {{ border-color: {RED}; color: {RED}; }}
+  .restart-note {{
+    font-size: 10px; color: {YELLOW}; margin-top: 2px;
+  }}
+  .footer {{
+    margin-top: 16px;
+    display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+  }}
+  .footer a {{
+    padding: 8px 16px;
+    background: rgba(28, 27, 36, 0.6);
+    border: 1px solid rgba(40, 38, 51, 0.5);
+    border-radius: 8px; text-decoration: none;
+    color: {ACCENT}; font-size: 13px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    transition: all 0.2s ease;
+  }}
+  .footer a:hover {{
+    background: rgba(38, 36, 48, 0.85);
+    border-color: rgba(205, 141, 106, 0.3);
+    transform: translateY(-1px);
+  }}
+  @keyframes fadeIn {{
+    from {{ opacity: 0; transform: translateY(10px); }}
+    to   {{ opacity: 1; transform: translateY(0); }}
+  }}
+  .wordmark  {{ animation: fadeIn 0.5s ease 0.04s both; }}
+  .subtitle  {{ animation: fadeIn 0.5s ease 0.10s both; }}
+  .section   {{ animation: fadeIn 0.5s ease 0.18s both; }}
+  .save-bar  {{ animation: fadeIn 0.5s ease 0.26s both; }}
+  .footer    {{ animation: fadeIn 0.5s ease 0.30s both; }}
+</style>
+</head>
+<body>
+  <div class="bg-glow"></div>
+  <div class="content">
+    <div class="wordmark">Settings</div>
+    <div class="subtitle">Browser Configuration</div>
+
+    <div class="section">
+      <h2>General</h2>
+      <div class="card">
+        <div class="row">
+          <div class="row-label">Search Engine</div>
+          <input type="text" id="search_engine"
+            value="{html_mod.escape(settings.get('search_engine', ''))}"
+            placeholder="https://duckduckgo.com/?q={{}}">
+        </div>
+        <div class="row">
+          <div class="row-label">Default Zoom</div>
+          <input type="number" id="default_zoom" min="25" max="500"
+            value="{settings.get('default_zoom', 100)}" style="width:90px;flex:none"> %
+        </div>
+        <div class="row">
+          <div class="row-label">User Agent</div>
+          <input type="text" id="user_agent"
+            value="{html_mod.escape(settings.get('user_agent', ''))}"
+            placeholder="Leave blank for default">
+        </div>
+        <div class="row">
+          <div class="row-label">JavaScript</div>
+          <label class="toggle"><input type="checkbox" id="enable_javascript"
+            {_chk('enable_javascript', True)}><span class="slider"></span></label>
+        </div>
+        <div class="row">
+          <div class="row-label">Restore Session</div>
+          <label class="toggle"><input type="checkbox" id="restore_session"
+            {_chk('restore_session', True)}><span class="slider"></span></label>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Privacy</h2>
+      <div class="card">
+        <div class="row">
+          <div class="row-label">Ad Blocker</div>
+          <label class="toggle"><input type="checkbox" id="enable_adblock"
+            {_chk('enable_adblock', True)}><span class="slider"></span></label>
+        </div>
+        <div class="row">
+          <div class="row-label">HTTPS-Only Mode</div>
+          <label class="toggle"><input type="checkbox" id="https_only"
+            {_chk('https_only')}><span class="slider"></span></label>
+        </div>
+        <div class="row">
+          <div class="row-label">Do Not Track</div>
+          <label class="toggle"><input type="checkbox" id="do_not_track"
+            {_chk('do_not_track', True)}><span class="slider"></span></label>
+        </div>
+        <div class="row">
+          <div class="row-label">Strip Tracking Params</div>
+          <label class="toggle"><input type="checkbox" id="strip_tracking"
+            {_chk('strip_tracking', True)}><span class="slider"></span></label>
+        </div>
+        <div class="row">
+          <div class="row-label">Fingerprint Resistance</div>
+          <label class="toggle"><input type="checkbox" id="fingerprint_resistance"
+            {_chk('fingerprint_resistance')}><span class="slider"></span></label>
+        </div>
+        <div class="row">
+          <div class="row-label">Link Intelligence</div>
+          <label class="toggle"><input type="checkbox" id="link_intelligence"
+            {_chk('link_intelligence', True)}><span class="slider"></span></label>
+        </div>
+        <div class="row">
+          <div class="row-label">Auto-Delete Cookies
+            <div class="row-hint">Delete cookies when you leave a site</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="auto_delete_cookies"
+            {_chk('auto_delete_cookies')}><span class="slider"></span></label>
+        </div>
+        <div class="row">
+          <div class="row-label">Page Watch Interval</div>
+          <input type="number" id="page_watch_interval" min="1" max="1440"
+            value="{settings.get('page_watch_interval', 3600) // 60}"
+            style="width:80px;flex:none"> min
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>DNS</h2>
+      <div class="card">
+        <div class="row">
+          <div class="row-label">DNS-over-HTTPS
+            <div class="restart-note">Changes require restart</div>
+          </div>
+          <select id="dns_over_https" {dns_disabled}>{doh_options}</select>
+        </div>
+        <div class="row">
+          <div class="row-label">DoH Provider URL</div>
+          <input type="text" id="dns_over_https_provider" {dns_disabled}
+            value="{html_mod.escape(settings.get('dns_over_https_provider', ''))}"
+            placeholder="https://dns.cloudflare.com/dns-query">
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Shroud DNS</h2>
+      <div class="card">
+        <div class="row">
+          <div class="row-label">Server</div>
+          <div class="dns-row">
+            <input type="text" id="custom_dns_server" {dns_server_readonly}
+              value="{html_mod.escape(settings.get('custom_dns_server', ''))}"
+              placeholder="https://pfsense.local:8853">
+            <button class="btn btn-secondary" style="padding:8px 16px;flex:none"
+              onclick="settingsAct('{reg_btn_action}')">{reg_btn_text}</button>
+          </div>
+        </div>
+        <div class="row">
+          <div class="row-label">Status</div>
+          <span class="dns-status" style="color:{dns_status_color}">{dns_status_text}</span>
+        </div>
+        <div class="row">
+          <div class="row-label">Fallback to system DNS</div>
+          <label class="toggle"><input type="checkbox" id="custom_dns_fallback"
+            {_chk('custom_dns_fallback', True)}><span class="slider"></span></label>
+        </div>
+      </div>
+    </div>
+
+    <div class="save-bar">
+      <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+    </div>
+
+    <div class="footer">
+      {page_links}
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    function getVal(id) {{
+      var el = document.getElementById(id);
+      if (!el) return null;
+      if (el.type === 'checkbox') return el.checked;
+      if (el.type === 'number') return parseInt(el.value, 10);
+      return el.value;
+    }}
+
+    function saveSettings() {{
+      var s = {{
+        search_engine: getVal('search_engine'),
+        enable_javascript: getVal('enable_javascript'),
+        enable_adblock: getVal('enable_adblock'),
+        default_zoom: getVal('default_zoom'),
+        user_agent: getVal('user_agent'),
+        https_only: getVal('https_only'),
+        do_not_track: getVal('do_not_track'),
+        restore_session: getVal('restore_session'),
+        strip_tracking: getVal('strip_tracking'),
+        fingerprint_resistance: getVal('fingerprint_resistance'),
+        link_intelligence: getVal('link_intelligence'),
+        page_watch_interval: getVal('page_watch_interval') * 60,
+        auto_delete_cookies: getVal('auto_delete_cookies'),
+        dns_over_https: getVal('dns_over_https'),
+        dns_over_https_provider: getVal('dns_over_https_provider'),
+        custom_dns_fallback: getVal('custom_dns_fallback')
+      }};
+      console.log('__SHROUD_SETTINGS__:' + JSON.stringify({{
+        action: 'save', settings: s
+      }}));
+      showToast('Settings saved');
+    }}
+
+    function settingsAct(action) {{
+      if (action === 'unregister') {{
+        if (!confirm('Unregistering will clear your DNS credentials and restart the browser. Continue?'))
+          return;
+      }}
+      var server = getVal('custom_dns_server') || '';
+      console.log('__SHROUD_SETTINGS__:' + JSON.stringify({{
+        action: action, server_url: server
+      }}));
+    }}
+
+    function showToast(msg, isError) {{
+      var t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = 'toast visible' + (isError ? ' error' : '');
+      setTimeout(function() {{ t.className = 'toast'; }}, 3000);
+    }}
+
+    window.__shroudSettingsResult = function(data) {{
+      if (data.error) showToast(data.error, true);
+      else if (data.msg) showToast(data.msg);
+      if (data.reload) setTimeout(function() {{ location.reload(); }}, 500);
+    }};
+  </script>
+</body>
+</html>"""
 
     def _page_watches(self):
         """Generate the shroud://watches page watch management page."""

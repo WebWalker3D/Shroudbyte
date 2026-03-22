@@ -573,9 +573,10 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(self._make_action("Developer Tools", self._open_devtools, "F12"))
         tools_menu.addAction(self._make_action("Screenshot\u2026", self._take_screenshot, "Ctrl+Shift+E"))
         tools_menu.addSeparator()
+        tools_menu.addAction(self._make_action("Privacy Dashboard",
+            lambda: self.add_new_tab(QUrl("shroud://privacy"))))
         tools_menu.addAction(self._make_action("Cookie Manager", self._show_cookie_manager))
         tools_menu.addAction(self._make_action("Site Permissions\u2026", self._show_permissions))
-        tools_menu.addSeparator()
         tools_menu.addAction(self._make_action("Page Watches",
             lambda: self.add_new_tab(QUrl("shroud://watches"))))
         tools_menu.addAction(self._make_action("Clear Browsing Data\u2026", self._show_clear_data))
@@ -1609,122 +1610,38 @@ class MainWindow(QMainWindow):
     def _open_bookmark(self, url):
         self._current_view().load(QUrl(url))
 
+    def _handle_page_action(self, data):
+        """Handle actions from shroud://bookmarks and shroud://history pages."""
+        action = data.get("action", "")
+        arg = data.get("arg", "")
+
+        if action == "del_bookmark" and arg:
+            storage.remove_bookmark(arg)
+            self._populate_bookmarks_menu()
+            view = self._current_view()
+            if view:
+                self._update_bookmark_btn(view.url())
+        elif action == "clear_history":
+            storage.clear_history()
+            self._status.showMessage("History cleared", 2000)
+
     def _show_bookmarks(self):
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Bookmarks")
-        dialog.setMinimumSize(520, 440)
-
-        layout = QVBoxLayout(dialog)
-        layout.setSpacing(12)
-        layout.setContentsMargins(16, 16, 16, 16)
-
-        listw = QListWidget()
-        listw.setStyleSheet(style.LIST_WIDGET_STYLE)
-
-        bookmarks = storage.load_bookmarks()
-        for bm in bookmarks:
-            item = QListWidgetItem(f'{bm["title"]}\n{bm["url"]}')
-            item.setData(Qt.ItemDataRole.UserRole, bm["url"])
-            listw.addItem(item)
-
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(8)
-        open_btn = QPushButton("Open")
-        open_btn.setStyleSheet(style.DIALOG_BTN_PRIMARY_STYLE)
-        delete_btn = QPushButton("Delete")
-        delete_btn.setStyleSheet(style.DIALOG_BTN_DANGER_STYLE)
-        close_btn = QPushButton("Close")
-        close_btn.setStyleSheet(style.DIALOG_BTN_STYLE)
-
-        def open_selected():
-            item = listw.currentItem()
-            if item:
-                self._current_view().load(QUrl(item.data(Qt.ItemDataRole.UserRole)))
-                dialog.close()
-
-        def delete_selected():
-            item = listw.currentItem()
-            if item:
-                storage.remove_bookmark(item.data(Qt.ItemDataRole.UserRole))
-                listw.takeItem(listw.row(item))
-                self._populate_bookmarks_menu()
-                self._update_bookmark_btn(self._current_view().url())
-
-        open_btn.clicked.connect(open_selected)
-        delete_btn.clicked.connect(delete_selected)
-        close_btn.clicked.connect(dialog.close)
-        listw.itemDoubleClicked.connect(lambda: open_selected())
-
-        btn_layout.addWidget(open_btn)
-        btn_layout.addWidget(delete_btn)
-        btn_layout.addStretch()
-        btn_layout.addWidget(close_btn)
-
-        layout.addWidget(listw)
-        layout.addLayout(btn_layout)
-        dialog.exec()
+        view = self._current_view()
+        if view:
+            view.load(QUrl("shroud://bookmarks"))
+        else:
+            self.add_new_tab(QUrl("shroud://bookmarks"))
 
     # ------------------------------------------------------------------
     # History
     # ------------------------------------------------------------------
 
     def _show_history(self):
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Browsing History")
-        dialog.setMinimumSize(580, 480)
-
-        layout = QVBoxLayout(dialog)
-        layout.setSpacing(12)
-        layout.setContentsMargins(16, 16, 16, 16)
-
-        search = QLineEdit()
-        search.setPlaceholderText("  Filter history...")
-        search.setStyleSheet(style.SEARCH_INPUT_STYLE)
-        layout.addWidget(search)
-
-        listw = QListWidget()
-        listw.setStyleSheet(style.LIST_WIDGET_STYLE)
-
-        history = storage.load_history()
-
-        def populate(filter_text=""):
-            listw.clear()
-            ft = filter_text.lower()
-            for h in history:
-                if ft and ft not in h["title"].lower() and ft not in h["url"].lower():
-                    continue
-                ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(h["visited"]))
-                item = QListWidgetItem(f'[{ts}]  {h["title"]}\n{h["url"]}')
-                item.setData(Qt.ItemDataRole.UserRole, h["url"])
-                listw.addItem(item)
-
-        populate()
-        search.textChanged.connect(populate)
-
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(8)
-        open_btn = QPushButton("Open")
-        open_btn.setStyleSheet(style.DIALOG_BTN_PRIMARY_STYLE)
-        close_btn = QPushButton("Close")
-        close_btn.setStyleSheet(style.DIALOG_BTN_STYLE)
-
-        def open_selected():
-            item = listw.currentItem()
-            if item:
-                self._current_view().load(QUrl(item.data(Qt.ItemDataRole.UserRole)))
-                dialog.close()
-
-        open_btn.clicked.connect(open_selected)
-        close_btn.clicked.connect(dialog.close)
-        listw.itemDoubleClicked.connect(lambda: open_selected())
-
-        btn_layout.addWidget(open_btn)
-        btn_layout.addStretch()
-        btn_layout.addWidget(close_btn)
-
-        layout.addWidget(listw)
-        layout.addLayout(btn_layout)
-        dialog.exec()
+        view = self._current_view()
+        if view:
+            view.load(QUrl("shroud://history"))
+        else:
+            self.add_new_tab(QUrl("shroud://history"))
 
     def _clear_history(self):
         reply = QMessageBox.question(
@@ -1921,22 +1838,12 @@ class MainWindow(QMainWindow):
     def _view_source(self):
         view = self._current_view()
         if view:
-            view.page().toHtml(self._show_source_dialog)
+            self._pending_source_url = view.url().toString()
+            view.page().toHtml(self._open_source_tab)
 
-    def _show_source_dialog(self, html):
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Page Source")
-        dialog.setMinimumSize(720, 520)
-        layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(0, 0, 0, 0)
-
-        from PyQt6.QtWidgets import QTextEdit
-        editor = QTextEdit()
-        editor.setReadOnly(True)
-        editor.setPlainText(html)
-        editor.setStyleSheet(style.SOURCE_EDITOR_STYLE)
-        layout.addWidget(editor)
-        dialog.exec()
+    def _open_source_tab(self, html):
+        self._pending_source_html = html
+        self.add_new_tab(QUrl("shroud://source"))
 
     # ------------------------------------------------------------------
     # Find on page (enhanced find bar)
@@ -2062,7 +1969,120 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _show_settings(self):
-        from PyQt6.QtWidgets import QScrollArea
+        """Open settings in a browser tab."""
+        view = self._current_view()
+        if view:
+            view.load(QUrl("shroud://settings"))
+        else:
+            self.add_new_tab(QUrl("shroud://settings"))
+
+    def _handle_settings_action(self, data, view=None):
+        """Process actions from the shroud://settings page."""
+        action = data.get("action", "")
+
+        if action == "save":
+            s = data.get("settings", {})
+            for key in (
+                "search_engine", "enable_javascript", "enable_adblock",
+                "default_zoom", "user_agent", "https_only", "do_not_track",
+                "restore_session", "strip_tracking", "fingerprint_resistance",
+                "link_intelligence", "page_watch_interval", "auto_delete_cookies",
+                "dns_over_https", "dns_over_https_provider", "custom_dns_fallback",
+            ):
+                if key in s:
+                    self._settings[key] = s[key]
+
+            storage.save_settings(self._settings)
+            self._apply_settings_runtime()
+            self._status.showMessage("Settings saved", 2000)
+            return
+
+        if action == "register":
+            server_url = data.get("server_url", "").strip()
+            if not server_url:
+                self._settings_page_result(view, error="Enter a server URL first.")
+                return
+            base = server_url.rstrip("/")
+            for suffix in ("/shroud-dns-query", "/shroud-dns-register", "/health"):
+                if base.endswith(suffix):
+                    base = base[:-len(suffix)]
+                    break
+            try:
+                import http.client, ssl as _ssl, urllib.parse
+                parsed = urllib.parse.urlparse(base)
+                ctx = _ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = _ssl.CERT_NONE
+                conn = http.client.HTTPSConnection(
+                    parsed.hostname, parsed.port or 443, context=ctx, timeout=10)
+                conn.connect()
+                conn.request("GET", "/shroud-dns-register")
+                resp = conn.getresponse()
+                if resp.status != 200:
+                    raise RuntimeError(f"Server returned HTTP {resp.status}")
+                reg_data = json.loads(resp.read())
+                conn.close()
+                secret = reg_data["secret"]
+                fingerprint = reg_data.get("cert_fingerprint", "")
+                storage.save_dns_secrets(self._settings, secret, fingerprint)
+                self._settings["custom_dns_enabled"] = True
+                self._settings["custom_dns_server"] = base
+                storage.save_settings(self._settings)
+                self._restart_browser()
+            except Exception as exc:
+                self._settings_page_result(view, error=f"Registration failed: {exc}")
+            return
+
+        if action == "unregister":
+            storage.clear_dns_secrets(self._settings)
+            self._settings["custom_dns_enabled"] = False
+            self._settings["custom_dns_server"] = ""
+            storage.save_settings(self._settings)
+            self._restart_browser()
+            return
+
+    def _settings_page_result(self, view, msg=None, error=None):
+        """Send a result message back to the settings page."""
+        if not view or not view.page():
+            return
+        result = {}
+        if msg:
+            result["msg"] = msg
+        if error:
+            result["error"] = error
+        view.page().runJavaScript(
+            f"window.__shroudSettingsResult&&window.__shroudSettingsResult({json.dumps(result)})"
+        )
+
+    def _apply_settings_runtime(self):
+        """Apply saved settings to running browser state."""
+        # Update DNS proxy if running
+        if self._dns_proxy is not None:
+            _base = self._settings["custom_dns_server"].rstrip("/")
+            secret = storage.get_dns_secret(self._settings)
+            fingerprint = storage.get_dns_cert_fingerprint(self._settings)
+            self._dns_proxy.update_config(
+                pfsense_url=_base + "/shroud-dns-query" if _base else "",
+                shared_secret=secret,
+                fallback=self._settings["custom_dns_fallback"],
+                cert_fingerprint=fingerprint,
+            )
+
+        self._apply_profile_settings()
+        self._adblocker.enabled = self._settings["enable_adblock"]
+        self._adblocker.strip_tracking = self._settings["strip_tracking"]
+        self._update_adblock_label()
+
+        # Apply HTTPS-only to all open tabs
+        for i in range(self._tabs.count()):
+            v = self._tabs.widget(i)
+            if v and hasattr(v.page(), "https_only"):
+                v.page().https_only = self._settings["https_only"]
+
+        self._adblocker.do_not_track = self._settings["do_not_track"]
+
+    def _placeholder_deleted(self):
+        pass  # _show_settings_OLD was here — replaced by shroud://settings
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Settings")
