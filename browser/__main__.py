@@ -1,10 +1,23 @@
 """Entry point for Shroudbyte."""
 
+import ctypes
+import ctypes.util
 import fcntl
 import os
 import signal
 import subprocess
 import sys
+
+# Set the process name so the desktop/app-switcher shows "shroudbyte"
+# instead of "python3".  Must happen before QApplication is created.
+def _set_process_name(name: str):
+    try:
+        libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+        libc.prctl(15, name.encode(), 0, 0, 0)  # PR_SET_NAME = 15
+    except Exception:
+        pass
+
+_set_process_name("shroudbyte")
 
 # Install global crash handler as early as possible so that any unhandled
 # exception during startup is caught and logged instead of dying silently.
@@ -204,6 +217,7 @@ def main():
         app = QApplication(sys.argv)
         app.setApplicationName(__app_name__)
         app.setOrganizationName("Shroudbyte")
+        app.setDesktopFileName("shroudbyte")
 
         # Dark palette for dialogs and system widgets
         from PyQt6.QtGui import QPalette

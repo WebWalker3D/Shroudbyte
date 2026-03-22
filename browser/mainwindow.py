@@ -140,8 +140,15 @@ class _SuggestionDelegate(QStyledItemDelegate):
 
 
 class MainWindow(QMainWindow):
+    # Signal for thread-safe delivery of link intelligence results.
+    # Emitted from the resolver's background thread; the connected slot
+    # runs on the GUI thread automatically via Qt's queued connection.
+    from PyQt6.QtCore import pyqtSignal
+    _link_resolved_sig = pyqtSignal(object, object)
+
     def __init__(self, dns_proxy=None):
         super().__init__()
+        self._link_resolved_sig.connect(self._on_link_resolved)
         self._dns_proxy = dns_proxy
 
         self._settings = storage.load_settings()
@@ -1296,8 +1303,8 @@ class MainWindow(QMainWindow):
             return
 
         def _callback(result):
-            from PyQt6.QtCore import QTimer
-            QTimer.singleShot(0, lambda: self._on_link_resolved(result, view))
+            # Emit signal — safe from any thread; Qt queues it to the GUI thread.
+            self._link_resolved_sig.emit(result, view)
 
         self._link_resolver.resolve(href, _callback)
 
@@ -1424,20 +1431,38 @@ class MainWindow(QMainWindow):
 
     window.__shroudShowLinkIntel = function(data) { showResult(data); };
 
+    function dismiss() {
+        clearTimeout(timer);
+        currentHref = null;
+        tip.style.opacity = '0';
+        setTimeout(function() { if (!currentHref) tip.style.display = 'none'; }, 200);
+    }
+
+    // Single mouseover handler replaces both mouseover+mouseout.
+    // When cursor moves between child elements of the same <a>,
+    // href === currentHref so we skip (no flicker, no reset).
     document.addEventListener('mouseover', function(e) {
         var a = e.target.closest('a[href]');
-        if (!a) return;
+
+        // Moved off any link — dismiss
+        if (!a) { if (currentHref) dismiss(); return; }
+
         var href = a.href;
-        if (!href) return;
+        if (!href) { if (currentHref) dismiss(); return; }
+
+        // Still on the same link (moved between child elements) — no-op
+        if (href === currentHref) return;
+
         var lc = href.toLowerCase();
         if (lc.startsWith('javascript:') || lc.startsWith('mailto:') ||
             lc.startsWith('tel:') || lc.startsWith('data:') || lc.startsWith('blob:')) return;
         if (href.indexOf('#') > 0 &&
             href.split('#')[0] === window.location.href.split('#')[0]) return;
 
+        // New link — reset and start fresh
+        clearTimeout(timer);
         currentHref = href;
         lastRect = a.getBoundingClientRect();
-        clearTimeout(timer);
 
         timer = setTimeout(function() {
             tip.innerHTML = '<div style="padding:8px 14px;color:#5a5568;font-size:11px;">' +
@@ -1450,14 +1475,8 @@ class MainWindow(QMainWindow):
         }, 400);
     }, true);
 
-    document.addEventListener('mouseout', function(e) {
-        var a = e.target.closest('a[href]');
-        if (!a) return;
-        clearTimeout(timer);
-        currentHref = null;
-        tip.style.opacity = '0';
-        setTimeout(function() { if (!currentHref) tip.style.display = 'none'; }, 200);
-    }, true);
+    // Catch cursor leaving the page entirely
+    document.addEventListener('mouseleave', function() { dismiss(); });
 })();"""
 
     # ------------------------------------------------------------------
