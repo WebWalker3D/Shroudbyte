@@ -2365,14 +2365,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _show_about(self):
-        QMessageBox.about(
-            self,
-            f"About {__app_name__}",
-            f"<h2 style='color: {style.ACCENT};'>{__app_name__}</h2>"
-            f"<p style='color: {style.TEXT_DIM};'>Version {__version__}</p>"
-            f"<p>A custom Linux web browser built with PyQt6 and QtWebEngine.</p>"
-            f"<p><b>Your browser. Your rules.</b></p>",
-        )
+        self.add_new_tab(QUrl("shroud://about"))
 
     # ------------------------------------------------------------------
     # Screenshot

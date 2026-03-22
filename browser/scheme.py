@@ -79,6 +79,21 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         m = re.search(r"Chrome/([\d.]+)", ua)
         chromium_ver = m.group(1) if m else "Unknown"
 
+        try:
+            import cryptography
+            crypto_ver = cryptography.__version__
+        except Exception:
+            crypto_ver = "N/A"
+
+        try:
+            import keyring
+            from importlib.metadata import version as _pkg_ver
+            kr_ver_str = _pkg_ver("keyring")
+            kr_backend = type(keyring.get_keyring()).__qualname__
+            kr_ver = f"{kr_ver_str} ({kr_backend})"
+        except Exception:
+            kr_ver = "Not available"
+
         os_info = f"{platform.system()} {platform.release()}"
         arch = platform.machine()
         profile_path = str(storage.DATA_DIR)
@@ -88,6 +103,8 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
             ("Qt", qt_ver),
             ("PyQt6", pyqt_ver),
             ("Chromium", chromium_ver),
+            ("cryptography", crypto_ver),
+            ("keyring", kr_ver),
             ("Platform", f"{os_info} ({arch})"),
             ("Profile", profile_path),
         ]
