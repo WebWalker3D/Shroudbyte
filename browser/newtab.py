@@ -317,8 +317,8 @@ def generate_new_tab_html():
     <div class="divider"></div>
 
     <div class="search-container">
-      <form action="{search_action}" method="get">
-        <input type="text" name="{search_param}" placeholder="Search the web\u2026" autofocus>
+      <form id="searchform" onsubmit="return handleSearch(event)">
+        <input type="text" id="searchbox" placeholder="Search or enter URL\u2026" autofocus>
         <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24"
              fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
           <circle cx="11" cy="11" r="7"/>
@@ -326,6 +326,36 @@ def generate_new_tab_html():
         </svg>
       </form>
     </div>
+    <script>
+    document.addEventListener('keydown', function(e) {{
+      var box = document.getElementById('searchbox');
+      if (document.activeElement === box) return;
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+      if (e.key.length === 1) {{
+        box.focus();
+      }}
+    }});
+    function handleSearch(e) {{
+      e.preventDefault();
+      var q = document.getElementById('searchbox').value.trim();
+      if (!q) return;
+      var hasScheme = new RegExp('^(https?|file|shroud)://', 'i').test(q);
+      var looksLikeUrl = hasScheme
+        || (q.indexOf('.') !== -1 && q.indexOf(' ') === -1)
+        || q.startsWith('localhost')
+        || q.startsWith('127.0.0.1')
+        || q.startsWith('[::1]');
+      if (looksLikeUrl) {{
+        if (!hasScheme) {{
+          q = (q.indexOf('.') !== -1 ? 'https://' : 'http://') + q;
+        }}
+        window.location.href = q;
+      }} else {{
+        var searchUrl = "{search_url}";
+        window.location.href = searchUrl.replace("{{}}", encodeURIComponent(q));
+      }}
+    }}
+    </script>
 
     {bookmarks_section}
   </div>
