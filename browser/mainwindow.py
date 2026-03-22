@@ -1159,6 +1159,12 @@ class MainWindow(QMainWindow):
                                 f"window.scrollTo(0, {pos} * "
                                 f"(document.documentElement.scrollHeight - window.innerHeight));"
                             )
+                # Inject form draft auto-save
+                if self._settings.get("form_draft_autosave", True):
+                    url = view.url().toString()
+                    draft = storage.get_form_draft(url)
+                    draft_json = json.dumps(draft) if draft else "null"
+                    view.page().runJavaScript(self._get_form_draft_js(draft_json))
             if self._vault.is_unlocked:
                 self._check_page_for_passwords()
                 self._check_session_for_credentials()
@@ -1591,6 +1597,127 @@ class MainWindow(QMainWindow):
 })();"""
 
     # ------------------------------------------------------------------
+    # Form Draft Auto-Save
+    # ------------------------------------------------------------------
+
+    def _handle_form_draft(self, data):
+        """Handle form draft save/dismiss from injected JS."""
+        action = data.get("action", "")
+        url = data.get("url", "")
+        if action == "save" and url:
+            fields = data.get("fields", {})
+            if fields:
+                storage.save_form_draft(url, fields)
+        elif action == "dismiss" and url:
+            storage.remove_form_draft(url)
+
+    def _get_form_draft_js(self, draft_json):
+        """Return JS that auto-saves form fields and offers draft restore."""
+        return f"""(function() {{
+    if (window.__shroudFormDraft) return;
+    window.__shroudFormDraft = true;
+
+    var SAVE_INTERVAL = 30000;
+    var savedDraft = {draft_json};
+
+    function getFields() {{
+        var fields = {{}};
+        var inputs = document.querySelectorAll('input, textarea, select');
+        var hasContent = false;
+        for (var i = 0; i < inputs.length; i++) {{
+            var el = inputs[i];
+            if (!el.name && !el.id) continue;
+            var key = el.name || el.id;
+            if (el.type === 'password' || el.type === 'hidden' || el.type === 'submit'
+                || el.type === 'button' || el.type === 'image' || el.type === 'file') continue;
+            var val;
+            if (el.type === 'checkbox' || el.type === 'radio') {{
+                val = el.checked;
+            }} else {{
+                val = el.value;
+            }}
+            if (val && val !== '' && val !== false) hasContent = true;
+            fields[key] = val;
+        }}
+        return hasContent ? fields : null;
+    }}
+
+    function restoreFields(fields) {{
+        for (var key in fields) {{
+            var el = document.querySelector('[name="' + key + '"], #' + CSS.escape(key));
+            if (!el) continue;
+            if (el.type === 'checkbox' || el.type === 'radio') {{
+                el.checked = !!fields[key];
+            }} else {{
+                el.value = fields[key] || '';
+            }}
+            el.dispatchEvent(new Event('input', {{bubbles: true}}));
+            el.dispatchEvent(new Event('change', {{bubbles: true}}));
+        }}
+    }}
+
+    // Periodic auto-save
+    setInterval(function() {{
+        var fields = getFields();
+        if (fields) {{
+            console.log('__SHROUD_FORM_DRAFT__:' + JSON.stringify({{
+                action: 'save', url: location.href, fields: fields
+            }}));
+        }}
+    }}, SAVE_INTERVAL);
+
+    // Also save on beforeunload
+    window.addEventListener('beforeunload', function() {{
+        var fields = getFields();
+        if (fields) {{
+            console.log('__SHROUD_FORM_DRAFT__:' + JSON.stringify({{
+                action: 'save', url: location.href, fields: fields
+            }}));
+        }}
+    }});
+
+    // Show restore bar if draft exists
+    if (savedDraft && savedDraft.fields) {{
+        var ago = '';
+        var diff = (Date.now() / 1000) - (savedDraft.saved || 0);
+        if (diff < 60) ago = 'just now';
+        else if (diff < 3600) ago = Math.floor(diff / 60) + 'm ago';
+        else if (diff < 86400) ago = Math.floor(diff / 3600) + 'h ago';
+        else ago = Math.floor(diff / 86400) + 'd ago';
+
+        var bar = document.createElement('div');
+        bar.style.cssText =
+            'position:fixed;top:0;left:0;right:0;z-index:2147483646;' +
+            'background:#14131a;border-bottom:1px solid #282633;' +
+            'padding:8px 16px;display:flex;align-items:center;gap:12px;' +
+            'font-family:-apple-system,Cantarell,sans-serif;font-size:13px;color:#ede8e3;' +
+            'box-shadow:0 4px 16px rgba(0,0,0,0.4);';
+
+        bar.innerHTML =
+            '<span style="color:#8a8494;">Restore draft from ' + ago + '?</span>' +
+            '<button id="__shroud_draft_restore" style="padding:4px 14px;font-size:12px;' +
+            'background:#cd8d6a;color:#0c0b10;border:none;border-radius:6px;cursor:pointer;' +
+            'font-weight:600;font-family:inherit;">Restore</button>' +
+            '<button id="__shroud_draft_dismiss" style="padding:4px 14px;font-size:12px;' +
+            'background:transparent;color:#5a5568;border:1px solid #282633;border-radius:6px;' +
+            'cursor:pointer;font-family:inherit;">Dismiss</button>';
+
+        document.documentElement.appendChild(bar);
+
+        document.getElementById('__shroud_draft_restore').onclick = function() {{
+            restoreFields(savedDraft.fields);
+            bar.remove();
+        }};
+        document.getElementById('__shroud_draft_dismiss').onclick = function() {{
+            console.log('__SHROUD_FORM_DRAFT__:' + JSON.stringify({{
+                action: 'dismiss', url: location.href
+            }}));
+            bar.remove();
+        }};
+    }}
+}})();"""
+
+    # ------------------------------------------------------------------
     # Bookmarks
     # ------------------------------------------------------------------
 
@@ -2009,7 +2136,7 @@ class MainWindow(QMainWindow):
                 "default_zoom", "user_agent", "https_only", "do_not_track",
                 "restore_session", "strip_tracking", "fingerprint_resistance",
                 "link_intelligence", "page_watch_interval", "auto_delete_cookies",
-                "remember_scroll_position",
+                "form_draft_autosave", "remember_scroll_position",
                 "dns_over_https", "dns_over_https_provider", "custom_dns_fallback",
             ):
                 if key in s:

@@ -848,6 +848,13 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
           <label class="toggle"><input type="checkbox" id="auto_delete_cookies"
             {_chk('auto_delete_cookies')}><span class="slider"></span></label>
         </div>
+        <div class="row">
+          <div class="row-label">Form draft auto-save
+            <div class="row-hint">Recover form data after crashes or accidental navigation</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="form_draft_autosave"
+            {_chk('form_draft_autosave', True)}><span class="slider"></span></label>
+        </div>
       </div>
 
       <div class="section">
@@ -974,6 +981,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         link_intelligence: getVal('link_intelligence'),
         page_watch_interval: getVal('page_watch_interval') * 60,
         auto_delete_cookies: getVal('auto_delete_cookies'),
+        form_draft_autosave: getVal('form_draft_autosave'),
         remember_scroll_position: getVal('remember_scroll_position'),
         dns_over_https: getVal('dns_over_https'),
         dns_over_https_provider: getVal('dns_over_https_provider'),

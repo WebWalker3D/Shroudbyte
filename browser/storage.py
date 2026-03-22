@@ -118,6 +118,7 @@ DEFAULT_SETTINGS = {
     "link_intelligence": True,
     "page_watch_interval": 3600,
     "remember_scroll_position": True,
+    "form_draft_autosave": True,
 }
 
 
@@ -430,6 +431,45 @@ def set_scroll_position(url: str, position: float):
             del data[k]
     _scroll_cache.update(data)
     _save_json("scroll_positions.json", data)
+
+
+# ---------------------------------------------------------------------------
+# Form draft auto-save
+# ---------------------------------------------------------------------------
+
+_DRAFT_MAX = 200
+
+
+def load_form_drafts() -> dict:
+    return _load_json("form_drafts.json", {})
+
+
+def get_form_draft(url: str) -> dict | None:
+    """Return saved draft for a URL, or None."""
+    drafts = load_form_drafts()
+    return drafts.get(url)
+
+
+def save_form_draft(url: str, fields: dict, timestamp: float | None = None):
+    """Save form field values for a URL."""
+    drafts = load_form_drafts()
+    drafts[url] = {
+        "fields": fields,
+        "saved": timestamp or time.time(),
+    }
+    # Evict oldest if over limit
+    if len(drafts) > _DRAFT_MAX:
+        by_age = sorted(drafts.items(), key=lambda x: x[1].get("saved", 0))
+        for k, _ in by_age[:len(drafts) - _DRAFT_MAX]:
+            del drafts[k]
+    _save_json("form_drafts.json", drafts)
+
+
+def remove_form_draft(url: str):
+    drafts = load_form_drafts()
+    if url in drafts:
+        del drafts[url]
+        _save_json("form_drafts.json", drafts)
 
 
 # ---------------------------------------------------------------------------

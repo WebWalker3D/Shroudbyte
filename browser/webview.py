@@ -21,6 +21,7 @@ _PRIVACY_ACTION_PREFIX = "__SHROUD_PRIVACY__:"
 _WATCH_ACTION_PREFIX = "__SHROUD_WATCH__:"
 _SETTINGS_ACTION_PREFIX = "__SHROUD_SETTINGS__:"
 _PAGE_ACT_PREFIX = "__SHROUD_PAGE_ACT__:"
+_FORM_DRAFT_PREFIX = "__SHROUD_FORM_DRAFT__:"
 
 # Shared set of hosts known NOT to require HTTP auth.
 # Populated on successful HEAD checks; avoids repeat probes.
@@ -113,6 +114,16 @@ class ShroudPage(QWebEnginePage):
                 mw = self._get_main_window()
                 if mw and hasattr(mw, "_handle_page_action"):
                     mw._handle_page_action(data)
+            except Exception:
+                pass
+            return
+        if message.startswith(_FORM_DRAFT_PREFIX):
+            try:
+                import json as _json
+                data = _json.loads(message[len(_FORM_DRAFT_PREFIX):])
+                mw = self._get_main_window()
+                if mw and hasattr(mw, "_handle_form_draft"):
+                    mw._handle_form_draft(data)
             except Exception:
                 pass
             return
