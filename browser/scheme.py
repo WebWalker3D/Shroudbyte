@@ -86,240 +86,334 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         import json
         return json.dumps(s)
 
-    # ── Page generators ──────────────────────────────────────────
+    # ── Shared layout ─────────────────────────────────────────────
 
-    def _page_bookmarks(self):
-        """Generate the shroud://bookmarks page."""
-        bookmarks = storage.load_bookmarks()
+    _NAV = [
+        ("settings", "\u2699", "Settings"),
+        ("bookmarks", "\u2606", "Bookmarks"),
+        ("history", "\u29D6", "History"),
+        ("privacy", "\u26E8", "Privacy"),
+        ("watches", "\u25CE", "Page Watches"),
+        ("shortcuts", "\u2328", "Shortcuts"),
+        ("about", "\u2139", "About"),
+    ]
 
-        rows = ""
-        for bm in bookmarks:
-            esc_url = html_mod.escape(bm.get("url", ""))
-            esc_title = html_mod.escape(bm.get("title", esc_url)[:80])
-            rows += f"""
-      <div class="entry">
-        <a href="{esc_url}" class="entry-link">
-          <div class="entry-title">{esc_title}</div>
-          <div class="entry-url">{esc_url}</div>
-        </a>
-        <button class="act-btn danger" onclick="pageAct('del_bookmark','{esc_url}')">Delete</button>
-      </div>"""
+    def _wrap(self, title, active, content, extra_css="", extra_js="",
+              sub_nav=None):
+        """Wrap page content in the shared sidebar layout."""
+        nav_items = ""
+        for slug, icon, label in self._NAV:
+            cls = "nav-item active" if slug == active else "nav-item"
+            nav_items += (
+                f'<a href="shroud://{slug}" class="{cls}">'
+                f'<span class="nav-icon">{icon}</span> {label}</a>\n'
+            )
 
-        if not bookmarks:
-            rows = '<div class="empty">No bookmarks yet. Press Ctrl+D to bookmark a page.</div>'
-
-        page_links = "\n      ".join(
-            f'<a href="shroud://{n}">shroud://{n}</a>' for n in _PAGES
-        )
+        sub_nav_html = ""
+        if sub_nav:
+            sub_nav_html = '<div class="sub-nav">'
+            for sid, label in sub_nav:
+                sub_nav_html += (
+                    f'<a href="#{sid}" class="nav-item sub'
+                    f'{" active" if sid == sub_nav[0][0] else ""}"'
+                    f' onclick="showSection(\'{sid}\',this)">'
+                    f'{label}</a>\n'
+                )
+            sub_nav_html += '</div>'
 
         return f"""<!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>Bookmarks &mdash; {__app_name__}</title>
+<head><meta charset="utf-8"><title>{title} &mdash; {__app_name__}</title>
 <style>
   * {{ margin: 0; padding: 0; box-sizing: border-box; }}
   body {{
     background: {BG_DARK}; color: {TEXT};
     font-family: 'Cantarell', 'Noto Sans', system-ui, sans-serif;
-    display: flex; flex-direction: column; align-items: center;
-    min-height: 100vh; padding-top: 8vh; padding-bottom: 8vh;
+    display: flex; min-height: 100vh;
   }}
-  .bg-glow {{
-    position: fixed; top: 14%; left: 50%;
-    transform: translate(-50%, -50%);
-    width: 800px; height: 500px;
-    background: radial-gradient(ellipse, rgba(205, 141, 106, 0.04) 0%, transparent 65%);
-    pointer-events: none; z-index: 0;
+  .sidebar {{
+    position: fixed; top: 0; left: 0; bottom: 0;
+    width: 200px; background: {BG_MID};
+    border-right: 1px solid {BORDER};
+    padding: 24px 0; display: flex; flex-direction: column;
+    overflow-y: auto; z-index: 10;
   }}
-  .content {{
-    position: relative; z-index: 2;
-    display: flex; flex-direction: column; align-items: center;
-    width: 100%; max-width: 680px; padding: 0 24px;
+  .sidebar-title {{
+    font-size: 11px; font-weight: 700; color: {TEXT_FAINT};
+    letter-spacing: 3px; text-transform: uppercase;
+    padding: 0 20px 16px; user-select: none;
   }}
-  .wordmark {{
-    font-size: 28px; font-weight: 700;
-    letter-spacing: 6px; text-transform: uppercase; text-indent: 6px;
-    background: linear-gradient(135deg, {ACCENT_HOVER} 0%, {ACCENT} 35%, {ACCENT_TEXT} 65%, {ACCENT} 100%);
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    margin-bottom: 6px; user-select: none;
+  .nav-item {{
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 20px; cursor: pointer;
+    color: {TEXT_DIM}; font-size: 13px; font-weight: 500;
+    border-left: 3px solid transparent;
+    text-decoration: none; transition: all 0.12s;
   }}
-  .subtitle {{ font-size: 11px; color: {TEXT_FAINT}; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 32px; }}
+  .nav-item:hover {{ color: {TEXT}; background: {BG_HOVER}; }}
+  .nav-item.active {{
+    color: {ACCENT}; border-left-color: {ACCENT};
+    background: rgba(205, 141, 106, 0.06);
+  }}
+  .nav-icon {{ font-size: 14px; width: 18px; text-align: center; }}
+  .sub-nav {{
+    border-top: 1px solid {BORDER}; margin-top: 8px; padding-top: 8px;
+  }}
+  .nav-item.sub {{
+    padding-left: 28px; font-size: 12px;
+  }}
+  .main {{
+    margin-left: 200px; flex: 1;
+    padding: 32px 48px 48px; max-width: 860px;
+  }}
+  .page-title {{
+    font-size: 22px; font-weight: 700; color: {TEXT};
+    margin-bottom: 24px;
+  }}
+  .section {{ margin-bottom: 28px; }}
+  .section-title {{
+    font-size: 15px; font-weight: 600; color: {TEXT};
+    margin-bottom: 10px;
+  }}
+  .section-desc {{
+    font-size: 12px; color: {TEXT_FAINT}; margin-bottom: 10px;
+  }}
   .card {{
-    width: 100%; background: {BG_CARD}; border: 1px solid {BORDER};
-    border-radius: 12px; padding: 4px 0; margin-bottom: 24px; overflow: hidden;
+    background: {BG_CARD}; border: 1px solid {BORDER};
+    border-radius: 12px; padding: 4px 0; overflow: hidden;
   }}
+  .card-padded {{ padding: 6px 20px; }}
+  .row {{
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 11px 0; gap: 16px;
+  }}
+  .row + .row {{ border-top: 1px solid {BORDER}; }}
+  .row-label {{ font-size: 13px; color: {TEXT_DIM}; flex-shrink: 0; }}
+  .row-hint {{ font-size: 10px; color: {TEXT_FAINT}; margin-top: 2px; }}
   .entry {{
     display: flex; align-items: center; padding: 10px 18px; gap: 12px;
   }}
   .entry + .entry {{ border-top: 1px solid {BORDER}; }}
   .entry-link {{
-    flex: 1; min-width: 0; text-decoration: none;
-    transition: opacity 0.15s;
+    flex: 1; min-width: 0; text-decoration: none; transition: opacity 0.15s;
   }}
   .entry-link:hover {{ opacity: 0.8; }}
-  .entry-title {{ font-size: 13px; color: {TEXT}; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-  .entry-url {{ font-size: 11px; color: {TEXT_FAINT}; font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+  .entry-link:hover .entry-title {{ color: {ACCENT}; }}
+  .entry-title {{
+    font-size: 13px; color: {TEXT}; font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    transition: color 0.15s;
+  }}
+  .entry-url {{
+    font-size: 10px; color: {TEXT_FAINT}; font-family: monospace;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }}
+  .entry-date {{ font-size: 10px; color: {TEXT_FAINT}; flex-shrink: 0; }}
+  input[type="text"], input[type="number"], select {{
+    padding: 8px 12px; font-size: 13px;
+    background: {BG_CARD}; color: {TEXT};
+    border: 1px solid {BORDER}; border-radius: 8px;
+    font-family: inherit; flex: 1; min-width: 0;
+  }}
+  input[type="text"]:focus, input[type="number"]:focus, select:focus {{
+    border-color: {ACCENT}; outline: none;
+  }}
+  input[type="text"]:read-only {{ opacity: 0.5; cursor: not-allowed; }}
+  select {{ cursor: pointer; }}
+  select option {{ background: {BG_CARD}; color: {TEXT}; }}
+  .toggle {{ position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }}
+  .toggle input {{ opacity: 0; width: 0; height: 0; }}
+  .toggle .slider {{
+    position: absolute; cursor: pointer; inset: 0;
+    background: {BG_ACTIVE}; border-radius: 22px; transition: 0.2s;
+  }}
+  .toggle .slider:before {{
+    content: ""; position: absolute;
+    height: 16px; width: 16px; left: 3px; bottom: 3px;
+    background: {TEXT_FAINT}; border-radius: 50%; transition: 0.2s;
+  }}
+  .toggle input:checked + .slider {{ background: {ACCENT}; }}
+  .toggle input:checked + .slider:before {{ transform: translateX(18px); background: {BG_DARK}; }}
+  .btn {{
+    padding: 9px 24px; font-size: 13px; font-weight: 600;
+    border: none; border-radius: 8px; cursor: pointer;
+    font-family: inherit; transition: all 0.15s ease;
+    text-decoration: none; display: inline-block;
+  }}
+  .btn-primary {{ background: {ACCENT}; color: {BG_DARK}; }}
+  .btn-primary:hover {{ background: {ACCENT_HOVER}; }}
+  .btn-secondary {{ background: {BG_CARD}; color: {TEXT}; border: 1px solid {BORDER}; }}
+  .btn-secondary:hover {{ background: {BG_HOVER}; border-color: {ACCENT}; }}
   .act-btn {{
     padding: 4px 12px; font-size: 11px; font-weight: 500;
     border: 1px solid {BORDER}; border-radius: 5px;
     background: {BG_MID}; color: {TEXT_DIM}; cursor: pointer;
-    font-family: inherit; flex-shrink: 0;
+    font-family: inherit; flex-shrink: 0; text-decoration: none;
+    display: inline-block;
   }}
   .act-btn:hover {{ background: {ACCENT}; border-color: {ACCENT}; color: {BG_DARK}; }}
   .act-btn.danger {{ border-color: {RED}; color: {RED}; background: transparent; }}
   .act-btn.danger:hover {{ background: {RED}; color: {BG_DARK}; }}
+  .act-btn.visit {{ border-color: {GREEN}; color: {GREEN}; background: transparent; }}
+  .act-btn.visit:hover {{ background: {GREEN}; color: {BG_DARK}; }}
   .empty {{ text-align: center; padding: 40px 20px; color: {TEXT_FAINT}; font-size: 14px; }}
-  .stat {{ font-size: 12px; color: {TEXT_DIM}; margin-bottom: 16px; }}
-  .footer {{ margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }}
-  .footer a {{ padding: 8px 16px; background: rgba(28,27,36,0.6); border: 1px solid rgba(40,38,51,0.5); border-radius: 8px; text-decoration: none; color: {ACCENT}; font-size: 13px; font-family: 'JetBrains Mono', monospace; transition: all 0.2s; }}
-  .footer a:hover {{ background: rgba(38,36,48,0.85); border-color: rgba(205,141,106,0.3); transform: translateY(-1px); }}
-  @keyframes fadeIn {{ from {{ opacity: 0; transform: translateY(10px); }} to {{ opacity: 1; transform: translateY(0); }} }}
-  .wordmark {{ animation: fadeIn 0.5s ease 0.04s both; }}
-  .subtitle {{ animation: fadeIn 0.5s ease 0.10s both; }}
-  .card {{ animation: fadeIn 0.5s ease 0.18s both; }}
-</style>
-</head>
-<body>
-  <div class="bg-glow"></div>
-  <div class="content">
-    <div class="wordmark">Bookmarks</div>
-    <div class="subtitle">{len(bookmarks)} saved</div>
-    <div class="card">{rows}</div>
-    <div class="footer">{page_links}</div>
-  </div>
-  <script>
-    function pageAct(action, arg) {{
-      console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify({{action:action,arg:arg}}));
-      setTimeout(function(){{ location.reload(); }}, 200);
-    }}
-  </script>
-</body>
-</html>"""
-
-    def _page_history(self):
-        """Generate the shroud://history page with client-side filtering."""
-        import time as _time
-        history = storage.load_history()
-
-        rows_js = []
-        for h in history[:2000]:
-            ts = _time.strftime("%Y-%m-%d %H:%M", _time.localtime(h.get("visited", 0)))
-            esc_url = html_mod.escape(h.get("url", ""))
-            esc_title = html_mod.escape(h.get("title", "")[:80])
-            rows_js.append(
-                f'{{"t":"{esc_title}","u":"{esc_url}","d":"{ts}"}}'
-            )
-
-        history_json = "[" + ",\n".join(rows_js) + "]"
-
-        page_links = "\n      ".join(
-            f'<a href="shroud://{n}">shroud://{n}</a>' for n in _PAGES
-        )
-
-        return f"""<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><title>History &mdash; {__app_name__}</title>
-<style>
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  body {{
-    background: {BG_DARK}; color: {TEXT};
-    font-family: 'Cantarell', 'Noto Sans', system-ui, sans-serif;
-    display: flex; flex-direction: column; align-items: center;
-    min-height: 100vh; padding-top: 8vh; padding-bottom: 8vh;
+  .stat-row {{
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 12px; margin-bottom: 24px;
   }}
-  .bg-glow {{
-    position: fixed; top: 14%; left: 50%; transform: translate(-50%, -50%);
-    width: 800px; height: 500px;
-    background: radial-gradient(ellipse, rgba(205, 141, 106, 0.04) 0%, transparent 65%);
-    pointer-events: none; z-index: 0;
+  .stat-card {{
+    background: {BG_CARD}; border: 1px solid {BORDER};
+    border-radius: 10px; padding: 16px; text-align: center;
   }}
-  .content {{
-    position: relative; z-index: 2;
-    display: flex; flex-direction: column; align-items: center;
-    width: 100%; max-width: 680px; padding: 0 24px;
+  .stat-num {{
+    font-size: 28px; font-weight: 700;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    color: {ACCENT};
   }}
-  .wordmark {{
-    font-size: 28px; font-weight: 700; letter-spacing: 6px;
-    text-transform: uppercase; text-indent: 6px;
-    background: linear-gradient(135deg, {ACCENT_HOVER} 0%, {ACCENT} 35%, {ACCENT_TEXT} 65%, {ACCENT} 100%);
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    margin-bottom: 6px; user-select: none;
+  .stat-label {{
+    font-size: 10px; color: {TEXT_FAINT};
+    text-transform: uppercase; letter-spacing: 1px; margin-top: 4px;
   }}
-  .subtitle {{ font-size: 11px; color: {TEXT_FAINT}; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 24px; }}
+  .dot {{
+    display: inline-block; width: 8px; height: 8px;
+    border-radius: 50%; flex-shrink: 0;
+  }}
+  .dot.red {{ background: {RED}; }}
+  .dot.green {{ background: {GREEN}; }}
+  .dot.yellow {{ background: {YELLOW}; }}
+  .dot.dim {{ background: {TEXT_FAINT}; }}
   .search {{
     width: 100%; padding: 10px 16px; font-size: 14px;
     background: {BG_CARD}; color: {TEXT}; border: 1px solid {BORDER};
     border-radius: 10px; margin-bottom: 16px; font-family: inherit;
   }}
   .search:focus {{ border-color: {ACCENT}; outline: none; }}
-  .actions-bar {{
-    display: flex; justify-content: flex-end; width: 100%; margin-bottom: 12px;
+  .toast {{
+    position: fixed; bottom: 24px; left: 50%;
+    transform: translateX(-50%);
+    padding: 10px 24px; border-radius: 8px;
+    background: {BG_CARD}; border: 1px solid {GREEN};
+    color: {GREEN}; font-size: 13px;
+    opacity: 0; transition: opacity 0.3s ease;
+    z-index: 100; pointer-events: none;
   }}
-  .card {{
-    width: 100%; background: {BG_CARD}; border: 1px solid {BORDER};
-    border-radius: 12px; padding: 4px 0; margin-bottom: 24px; overflow: hidden;
-    max-height: 70vh; overflow-y: auto;
+  .toast.visible {{ opacity: 1; }}
+  .toast.error {{ border-color: {RED}; color: {RED}; }}
+  .panel {{ display: none; }}
+  .panel.active {{ display: block; }}
+  @keyframes fadeIn {{
+    from {{ opacity: 0; transform: translateY(6px); }}
+    to   {{ opacity: 1; transform: translateY(0); }}
   }}
-  .entry {{
-    display: flex; align-items: center; padding: 8px 18px; gap: 12px;
-  }}
-  .entry + .entry {{ border-top: 1px solid {BORDER}; }}
-  .entry-link {{
-    flex: 1; min-width: 0; text-decoration: none;
-  }}
-  .entry-link:hover .entry-title {{ color: {ACCENT}; }}
-  .entry-title {{ font-size: 13px; color: {TEXT}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.15s; }}
-  .entry-url {{ font-size: 10px; color: {TEXT_FAINT}; font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-  .entry-date {{ font-size: 10px; color: {TEXT_FAINT}; flex-shrink: 0; }}
-  .act-btn {{
-    padding: 4px 12px; font-size: 11px; font-weight: 500;
-    border: 1px solid {BORDER}; border-radius: 5px;
-    background: {BG_MID}; color: {TEXT_DIM}; cursor: pointer;
-    font-family: inherit;
-  }}
-  .act-btn:hover {{ background: {ACCENT}; border-color: {ACCENT}; color: {BG_DARK}; }}
-  .act-btn.danger {{ border-color: {RED}; color: {RED}; background: transparent; }}
-  .act-btn.danger:hover {{ background: {RED}; color: {BG_DARK}; }}
-  .empty {{ text-align: center; padding: 40px 20px; color: {TEXT_FAINT}; font-size: 14px; }}
-  .footer {{ margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }}
-  .footer a {{ padding: 8px 16px; background: rgba(28,27,36,0.6); border: 1px solid rgba(40,38,51,0.5); border-radius: 8px; text-decoration: none; color: {ACCENT}; font-size: 13px; font-family: 'JetBrains Mono', monospace; transition: all 0.2s; }}
-  .footer a:hover {{ background: rgba(38,36,48,0.85); border-color: rgba(205,141,106,0.3); transform: translateY(-1px); }}
-  @keyframes fadeIn {{ from {{ opacity: 0; transform: translateY(10px); }} to {{ opacity: 1; transform: translateY(0); }} }}
-  .wordmark {{ animation: fadeIn 0.5s ease 0.04s both; }}
-  .card {{ animation: fadeIn 0.5s ease 0.18s both; }}
+  .main > * {{ animation: fadeIn 0.3s ease both; }}
+  {extra_css}
 </style>
 </head>
 <body>
-  <div class="bg-glow"></div>
-  <div class="content">
-    <div class="wordmark">History</div>
-    <div class="subtitle">{len(history)} entries</div>
+  <nav class="sidebar">
+    <div class="sidebar-title">{__app_name__}</div>
+    {nav_items}
+    {sub_nav_html}
+  </nav>
+  <div class="main">
+    <div class="page-title">{title}</div>
+    {content}
+  </div>
+  <div class="toast" id="toast"></div>
+  <script>
+    function showSection(name, el) {{
+      document.querySelectorAll('.panel').forEach(function(p) {{ p.classList.remove('active'); }});
+      var panel = document.getElementById('panel-' + name);
+      if (panel) panel.classList.add('active');
+      document.querySelectorAll('.nav-item.sub').forEach(function(n) {{ n.classList.remove('active'); }});
+      if (el) el.classList.add('active');
+      history.replaceState(null, '', '#' + name);
+    }}
+    (function() {{
+      var hash = location.hash.replace('#', '');
+      if (hash && document.getElementById('panel-' + hash)) {{
+        showSection(hash, document.querySelector('.nav-item.sub[href="#' + hash + '"]'));
+      }} else {{
+        var first = document.querySelector('.panel');
+        if (first) first.classList.add('active');
+      }}
+    }})();
+    function showToast(msg, isError) {{
+      var t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = 'toast visible' + (isError ? ' error' : '');
+      setTimeout(function() {{ t.className = 'toast'; }}, 3000);
+    }}
+    {extra_js}
+  </script>
+</body>
+</html>"""
+
+    # ── Page generators ──────────────────────────────────────────
+
+    def _page_bookmarks(self):
+        bookmarks = storage.load_bookmarks()
+        rows = ""
+        for bm in bookmarks:
+            esc_url = html_mod.escape(bm.get("url", ""))
+            esc_title = html_mod.escape(bm.get("title", esc_url)[:80])
+            rows += (
+                f'<div class="entry">'
+                f'<a href="{esc_url}" class="entry-link">'
+                f'<div class="entry-title">{esc_title}</div>'
+                f'<div class="entry-url">{esc_url}</div></a>'
+                f'<button class="act-btn danger" '
+                f"onclick=\"pageAct('del_bookmark','{esc_url}')\">Delete</button>"
+                f'</div>'
+            )
+        if not bookmarks:
+            rows = '<div class="empty">No bookmarks yet. Press Ctrl+D to bookmark a page.</div>'
+
+        content = f"""
+    <div class="section-desc">{len(bookmarks)} saved</div>
+    <div class="card">{rows}</div>"""
+
+        return self._wrap("Bookmarks", "bookmarks", content, extra_js="""
+    function pageAct(action, arg) {
+      console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify({action:action,arg:arg}));
+      setTimeout(function(){ location.reload(); }, 200);
+    }""")
+
+    def _page_history(self):
+        import time as _time
+        history = storage.load_history()
+        rows_js = []
+        for h in history[:2000]:
+            ts = _time.strftime("%Y-%m-%d %H:%M", _time.localtime(h.get("visited", 0)))
+            esc_url = html_mod.escape(h.get("url", ""))
+            esc_title = html_mod.escape(h.get("title", "")[:80])
+            rows_js.append(f'{{"t":"{esc_title}","u":"{esc_url}","d":"{ts}"}}')
+        history_json = "[" + ",\n".join(rows_js) + "]"
+
+        content = f"""
+    <div class="section-desc">{len(history)} entries</div>
     <input class="search" type="text" placeholder="Filter history..." oninput="filterHistory(this.value)">
-    <div class="actions-bar">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
       <button class="act-btn danger" onclick="if(confirm('Clear all history?'))pageAct('clear_history','')">Clear All History</button>
     </div>
-    <div class="card" id="historyList"></div>
-    <div class="footer">{page_links}</div>
-  </div>
-  <script>
+    <div class="card" id="historyList" style="max-height:70vh;overflow-y:auto;"></div>"""
+
+        return self._wrap("History", "history", content, extra_js=f"""
     var _history = {history_json};
-
     function esc(s) {{ var d = document.createElement('span'); d.textContent = s; return d.innerHTML; }}
-
     function renderHistory(items) {{
       var el = document.getElementById('historyList');
       if (!items.length) {{ el.innerHTML = '<div class="empty">No matching history.</div>'; return; }}
       var h = '';
       for (var i = 0; i < items.length && i < 500; i++) {{
         var e = items[i];
-        h += '<div class="entry">' +
-          '<a class="entry-link" href="' + e.u + '">' +
+        h += '<div class="entry"><a class="entry-link" href="' + e.u + '">' +
           '<div class="entry-title">' + esc(e.t || e.u) + '</div>' +
           '<div class="entry-url">' + esc(e.u) + '</div></a>' +
           '<span class="entry-date">' + e.d + '</span></div>';
       }}
       el.innerHTML = h;
     }}
-
     function filterHistory(q) {{
       if (!q) {{ renderHistory(_history); return; }}
       var lq = q.toLowerCase();
@@ -328,16 +422,11 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
                (e.u && e.u.toLowerCase().indexOf(lq) !== -1);
       }}));
     }}
-
     function pageAct(action, arg) {{
       console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify({{action:action,arg:arg}}));
       setTimeout(function(){{ location.reload(); }}, 200);
     }}
-
-    renderHistory(_history);
-  </script>
-</body>
-</html>"""
+    renderHistory(_history);""")
 
     def _page_source(self):
         """Generate the shroud://source page with the stored HTML source."""
@@ -445,124 +534,130 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
   body {{
     background: {BG_DARK}; color: {TEXT};
     font-family: 'Cantarell', 'Noto Sans', system-ui, sans-serif;
-    display: flex; flex-direction: column; align-items: center;
-    min-height: 100vh; padding-top: 8vh; padding-bottom: 8vh;
+    display: flex; min-height: 100vh;
   }}
-  .bg-glow {{
-    position: fixed; top: 14%; left: 50%;
-    transform: translate(-50%, -50%);
-    width: 800px; height: 500px;
-    background: radial-gradient(ellipse, rgba(205, 141, 106, 0.04) 0%, transparent 65%);
-    pointer-events: none; z-index: 0;
+
+  /* ── Sidebar ── */
+  .sidebar {{
+    position: fixed; top: 0; left: 0; bottom: 0;
+    width: 220px; background: {BG_MID};
+    border-right: 1px solid {BORDER};
+    padding: 24px 0; display: flex; flex-direction: column;
+    overflow-y: auto; z-index: 10;
   }}
-  .content {{
-    position: relative; z-index: 2;
-    display: flex; flex-direction: column; align-items: center;
-    width: 100%; max-width: 600px; padding: 0 24px;
-  }}
-  .wordmark {{
-    font-size: 28px; font-weight: 700;
-    letter-spacing: 6px; text-transform: uppercase; text-indent: 6px;
-    background: linear-gradient(
-      135deg, {ACCENT_HOVER} 0%, {ACCENT} 35%, {ACCENT_TEXT} 65%, {ACCENT} 100%
-    );
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    margin-bottom: 6px; user-select: none;
-  }}
-  .subtitle {{
-    font-size: 11px; color: {TEXT_FAINT};
+  .sidebar-title {{
+    font-size: 11px; font-weight: 700; color: {TEXT_FAINT};
     letter-spacing: 3px; text-transform: uppercase;
-    margin-bottom: 32px;
+    padding: 0 20px 20px; user-select: none;
   }}
-  .section {{ width: 100%; margin-bottom: 20px; }}
-  .section h2 {{
-    font-size: 11px; text-transform: uppercase;
-    letter-spacing: 3px; color: {TEXT_FAINT};
-    font-weight: 600; margin-bottom: 10px; padding-left: 4px;
+  .nav-items {{ flex: 1; }}
+  .nav-item {{
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 20px; cursor: pointer;
+    color: {TEXT_DIM}; font-size: 13px; font-weight: 500;
+    border-left: 3px solid transparent;
+    text-decoration: none; transition: all 0.15s;
   }}
-  .card {{
-    width: 100%; background: {BG_CARD};
-    border: 1px solid {BORDER}; border-radius: 12px;
-    padding: 6px 20px; overflow: hidden;
+  .nav-item:hover {{ color: {TEXT}; background: {BG_HOVER}; }}
+  .nav-item.active {{
+    color: {ACCENT}; border-left-color: {ACCENT};
+    background: rgba(205, 141, 106, 0.06);
   }}
+  .nav-icon {{ font-size: 15px; width: 20px; text-align: center; }}
+  .sidebar-footer {{
+    padding: 12px 20px; border-top: 1px solid {BORDER};
+  }}
+  .sidebar-footer a {{
+    display: block; padding: 6px 0;
+    color: {TEXT_FAINT}; font-size: 12px;
+    text-decoration: none;
+  }}
+  .sidebar-footer a:hover {{ color: {ACCENT}; }}
+
+  /* ── Main content ── */
+  .main {{
+    margin-left: 220px; flex: 1;
+    padding: 32px 48px 80px; max-width: 780px;
+  }}
+  .page-title {{
+    font-size: 22px; font-weight: 700; color: {TEXT};
+    margin-bottom: 24px;
+  }}
+
+  /* ── Sections ── */
+  .section {{ margin-bottom: 32px; }}
+  .section-title {{
+    font-size: 15px; font-weight: 600; color: {TEXT};
+    margin-bottom: 12px;
+  }}
+  .section-desc {{
+    font-size: 12px; color: {TEXT_FAINT}; margin-bottom: 12px;
+  }}
+
+  /* ── Rows ── */
   .row {{
     display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 0; gap: 16px;
+    padding: 11px 0; gap: 16px;
   }}
   .row + .row {{ border-top: 1px solid {BORDER}; }}
-  .row-label {{
-    font-size: 13px; color: {TEXT_DIM}; min-width: 160px; flex-shrink: 0;
-  }}
-  .row-hint {{
-    font-size: 10px; color: {TEXT_FAINT}; margin-top: 2px;
-  }}
+  .row-label {{ font-size: 13px; color: {TEXT_DIM}; flex-shrink: 0; }}
+  .row-hint {{ font-size: 10px; color: {TEXT_FAINT}; margin-top: 2px; }}
+
+  /* ── Inputs ── */
   input[type="text"], input[type="number"], select {{
     padding: 8px 12px; font-size: 13px;
-    background: {BG_DARK}; color: {TEXT};
+    background: {BG_CARD}; color: {TEXT};
     border: 1px solid {BORDER}; border-radius: 8px;
     font-family: inherit; flex: 1; min-width: 0;
   }}
   input[type="text"]:focus, input[type="number"]:focus, select:focus {{
     border-color: {ACCENT}; outline: none;
   }}
-  input[type="text"]:read-only {{
-    opacity: 0.5; cursor: not-allowed;
-  }}
+  input[type="text"]:read-only {{ opacity: 0.5; cursor: not-allowed; }}
   select {{ cursor: pointer; }}
   select option {{ background: {BG_CARD}; color: {TEXT}; }}
 
-  /* Toggle switch */
+  /* ── Toggle switch ── */
   .toggle {{ position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }}
   .toggle input {{ opacity: 0; width: 0; height: 0; }}
   .toggle .slider {{
     position: absolute; cursor: pointer; inset: 0;
-    background: {BG_ACTIVE}; border-radius: 22px;
-    transition: 0.2s;
+    background: {BG_ACTIVE}; border-radius: 22px; transition: 0.2s;
   }}
   .toggle .slider:before {{
     content: ""; position: absolute;
     height: 16px; width: 16px; left: 3px; bottom: 3px;
-    background: {TEXT_FAINT}; border-radius: 50%;
-    transition: 0.2s;
+    background: {TEXT_FAINT}; border-radius: 50%; transition: 0.2s;
   }}
   .toggle input:checked + .slider {{ background: {ACCENT}; }}
-  .toggle input:checked + .slider:before {{
-    transform: translateX(18px); background: {BG_DARK};
-  }}
+  .toggle input:checked + .slider:before {{ transform: translateX(18px); background: {BG_DARK}; }}
 
-  .save-bar {{
-    position: sticky; bottom: 0;
-    width: 100%; padding: 16px 0;
-    display: flex; justify-content: center; gap: 12px;
-    background: linear-gradient(transparent, {BG_DARK} 30%);
-  }}
+  /* ── Buttons ── */
   .btn {{
-    padding: 10px 28px; font-size: 13px; font-weight: 600;
+    padding: 9px 24px; font-size: 13px; font-weight: 600;
     border: none; border-radius: 8px; cursor: pointer;
     font-family: inherit; transition: all 0.15s ease;
   }}
-  .btn-primary {{
-    background: {ACCENT}; color: {BG_DARK};
-  }}
+  .btn-primary {{ background: {ACCENT}; color: {BG_DARK}; }}
   .btn-primary:hover {{ background: {ACCENT_HOVER}; }}
-  .btn-secondary {{
-    background: {BG_CARD}; color: {TEXT};
-    border: 1px solid {BORDER};
-  }}
+  .btn-secondary {{ background: {BG_CARD}; color: {TEXT}; border: 1px solid {BORDER}; }}
   .btn-secondary:hover {{ background: {BG_HOVER}; border-color: {ACCENT}; }}
-  .btn-danger {{
-    background: transparent; color: {RED};
-    border: 1px solid {RED};
-  }}
+  .btn-danger {{ background: transparent; color: {RED}; border: 1px solid {RED}; }}
   .btn-danger:hover {{ background: {RED}; color: {BG_DARK}; }}
-  .btn:disabled {{ opacity: 0.4; cursor: not-allowed; }}
-  .dns-status {{
-    font-size: 11px; padding: 4px 10px;
-    border-radius: 4px;
-  }}
+
   .dns-row {{ display: flex; gap: 8px; align-items: center; flex: 1; min-width: 0; }}
+  .dns-status {{ font-size: 12px; }}
+  .restart-note {{ font-size: 10px; color: {YELLOW}; margin-top: 2px; }}
+
+  .save-bar {{
+    position: fixed; bottom: 0; left: 220px; right: 0;
+    padding: 14px 48px;
+    background: {BG_MID}; border-top: 1px solid {BORDER};
+    display: flex; align-items: center; gap: 12px;
+    z-index: 10;
+  }}
   .toast {{
-    position: fixed; bottom: 24px; left: 50%;
+    position: fixed; bottom: 70px; left: 50%;
     transform: translateX(-50%);
     padding: 10px 24px; border-radius: 8px;
     background: {BG_CARD}; border: 1px solid {GREEN};
@@ -572,151 +667,75 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
   }}
   .toast.visible {{ opacity: 1; }}
   .toast.error {{ border-color: {RED}; color: {RED}; }}
-  .restart-note {{
-    font-size: 10px; color: {YELLOW}; margin-top: 2px;
-  }}
-  .footer {{
-    margin-top: 16px;
-    display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
-  }}
-  .footer a {{
-    padding: 8px 16px;
-    background: rgba(28, 27, 36, 0.6);
-    border: 1px solid rgba(40, 38, 51, 0.5);
-    border-radius: 8px; text-decoration: none;
-    color: {ACCENT}; font-size: 13px;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    transition: all 0.2s ease;
-  }}
-  .footer a:hover {{
-    background: rgba(38, 36, 48, 0.85);
-    border-color: rgba(205, 141, 106, 0.3);
-    transform: translateY(-1px);
-  }}
+
   @keyframes fadeIn {{
-    from {{ opacity: 0; transform: translateY(10px); }}
+    from {{ opacity: 0; transform: translateY(6px); }}
     to   {{ opacity: 1; transform: translateY(0); }}
   }}
-  .wordmark  {{ animation: fadeIn 0.5s ease 0.04s both; }}
-  .subtitle  {{ animation: fadeIn 0.5s ease 0.10s both; }}
-  .section   {{ animation: fadeIn 0.5s ease 0.18s both; }}
-  .save-bar  {{ animation: fadeIn 0.5s ease 0.26s both; }}
-  .footer    {{ animation: fadeIn 0.5s ease 0.30s both; }}
+  .main > * {{ animation: fadeIn 0.3s ease both; }}
 </style>
 </head>
 <body>
-  <div class="bg-glow"></div>
-  <div class="content">
-    <div class="wordmark">Settings</div>
-    <div class="subtitle">Browser Configuration</div>
 
-    <div class="section">
-      <h2>General</h2>
-      <div class="card">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-title">Settings</div>
+    <div class="nav-items">
+      <a href="#general" class="nav-item active" onclick="showSection('general',this)">
+        <span class="nav-icon">\u2699</span> General</a>
+      <a href="#search" class="nav-item" onclick="showSection('search',this)">
+        <span class="nav-icon">\u2315</span> Search</a>
+      <a href="#privacy" class="nav-item" onclick="showSection('privacy',this)">
+        <span class="nav-icon">\u26E8</span> Privacy &amp; Security</a>
+      <a href="#dns" class="nav-item" onclick="showSection('dns',this)">
+        <span class="nav-icon">\u2301</span> DNS</a>
+    </div>
+    <div class="sidebar-footer">
+      <a href="shroud://privacy">Privacy Dashboard</a>
+      <a href="shroud://watches">Page Watches</a>
+      <a href="shroud://about">About {__app_name__}</a>
+      <a href="shroud://shortcuts">Keyboard Shortcuts</a>
+    </div>
+  </nav>
+
+  <!-- Main content -->
+  <div class="main">
+
+    <!-- General -->
+    <div class="panel" id="panel-general">
+      <div class="page-title">General</div>
+
+      <div class="section">
+        <div class="section-title">Startup</div>
         <div class="row">
-          <div class="row-label">Search Engine</div>
-          <div style="flex:1;display:flex;flex-direction:column;gap:6px;">
-            <select id="search_preset" onchange="applyPreset(this.value)"
-              style="padding:8px 12px;font-size:13px;background:{BG_DARK};color:{TEXT};border:1px solid {BORDER};border-radius:8px;cursor:pointer;font-family:inherit;">
-              <option value="">Custom URL</option>
-              <optgroup label="Private">
-              <option value="https://duckduckgo.com/?q={{}}">DuckDuckGo — no tracking, US-based</option>
-              <option value="https://www.startpage.com/sp/search?query={{}}">Startpage — Google results without tracking</option>
-              <option value="https://search.brave.com/search?q={{}}">Brave Search — independent index, no tracking</option>
-              <option value="https://www.mojeek.com/search?q={{}}">Mojeek — own crawler, UK-based, no tracking</option>
-              <option value="https://www.qwant.com/?q={{}}">Qwant — EU-based, GDPR-native privacy</option>
-              <option value="https://www.ecosia.org/search?q={{}}">Ecosia — plants trees, privacy-respecting</option>
-              </optgroup>
-              <optgroup label="Power User">
-              <option value="https://kagi.com/search?q={{}}">Kagi — paid, no ads, excellent results</option>
-              <option value="https://search.marginalia.nu/search?query={{}}">Marginalia — indie sites, non-commercial web</option>
-              <option value="https://wiby.me/?q={{}}">Wiby — lightweight/personal sites, old-school web</option>
-              </optgroup>
-              <optgroup label="Standard (trackers blocked by Shroudbyte)">
-              <option value="https://www.google.com/search?q={{}}">Google — best results, tracking blocked by browser</option>
-              <option value="https://www.bing.com/search?q={{}}">Bing — Microsoft search, tracking blocked by browser</option>
-              <option value="https://search.yahoo.com/search?p={{}}">Yahoo — Bing-powered, tracking blocked by browser</option>
-              <option value="https://yandex.com/search/?text={{}}">Yandex — Russian search engine, tracking blocked by browser</option>
-              </optgroup>
-            </select>
-            <input type="text" id="search_engine"
-              value="{html_mod.escape(settings.get('search_engine', ''))}"
-              placeholder="https://duckduckgo.com/?q={{}}"
-              style="font-size:12px;font-family:monospace;">
-          </div>
+          <div class="row-label">Restore previous session</div>
+          <label class="toggle"><input type="checkbox" id="restore_session"
+            {_chk('restore_session', True)}><span class="slider"></span></label>
         </div>
-        <div class="row">
-          <div class="row-label">Default Zoom</div>
-          <input type="number" id="default_zoom" min="25" max="500"
-            value="{settings.get('default_zoom', 100)}" style="width:90px;flex:none"> %
-        </div>
-        <div class="row">
-          <div class="row-label">User Agent</div>
-          <input type="text" id="user_agent"
-            value="{html_mod.escape(settings.get('user_agent', ''))}"
-            placeholder="Leave blank for default">
-        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Browsing</div>
         <div class="row">
           <div class="row-label">JavaScript</div>
           <label class="toggle"><input type="checkbox" id="enable_javascript"
             {_chk('enable_javascript', True)}><span class="slider"></span></label>
         </div>
         <div class="row">
-          <div class="row-label">Restore Session</div>
-          <label class="toggle"><input type="checkbox" id="restore_session"
-            {_chk('restore_session', True)}><span class="slider"></span></label>
-        </div>
-      </div>
-    </div>
-
-    <div class="section">
-      <h2>Privacy</h2>
-      <div class="card">
-        <div class="row">
-          <div class="row-label">Ad Blocker</div>
-          <label class="toggle"><input type="checkbox" id="enable_adblock"
-            {_chk('enable_adblock', True)}><span class="slider"></span></label>
+          <div class="row-label">Default zoom</div>
+          <input type="number" id="default_zoom" min="25" max="500"
+            value="{settings.get('default_zoom', 100)}" style="width:90px;flex:none">&nbsp;%
         </div>
         <div class="row">
-          <div class="row-label">HTTPS-Only Mode</div>
-          <label class="toggle"><input type="checkbox" id="https_only"
-            {_chk('https_only')}><span class="slider"></span></label>
-        </div>
-        <div class="row">
-          <div class="row-label">Do Not Track</div>
-          <label class="toggle"><input type="checkbox" id="do_not_track"
-            {_chk('do_not_track', True)}><span class="slider"></span></label>
-        </div>
-        <div class="row">
-          <div class="row-label">Strip Tracking Params</div>
-          <label class="toggle"><input type="checkbox" id="strip_tracking"
-            {_chk('strip_tracking', True)}><span class="slider"></span></label>
-        </div>
-        <div class="row">
-          <div class="row-label">Fingerprint Resistance</div>
-          <label class="toggle"><input type="checkbox" id="fingerprint_resistance"
-            {_chk('fingerprint_resistance')}><span class="slider"></span></label>
-        </div>
-        <div class="row">
-          <div class="row-label">Link Intelligence</div>
-          <label class="toggle"><input type="checkbox" id="link_intelligence"
-            {_chk('link_intelligence', True)}><span class="slider"></span></label>
-        </div>
-        <div class="row">
-          <div class="row-label">Auto-Delete Cookies
-            <div class="row-hint">Delete cookies when you leave a site</div>
+          <div class="row-label">User agent
+            <div class="row-hint">Leave blank for default</div>
           </div>
-          <label class="toggle"><input type="checkbox" id="auto_delete_cookies"
-            {_chk('auto_delete_cookies')}><span class="slider"></span></label>
+          <input type="text" id="user_agent"
+            value="{html_mod.escape(settings.get('user_agent', ''))}"
+            placeholder="Default">
         </div>
         <div class="row">
-          <div class="row-label">Page Watch Interval</div>
-          <input type="number" id="page_watch_interval" min="1" max="1440"
-            value="{settings.get('page_watch_interval', 3600) // 60}"
-            style="width:80px;flex:none"> min
-        </div>
-        <div class="row">
-          <div class="row-label">Remember Scroll Position
+          <div class="row-label">Remember scroll position
             <div class="row-hint">Resume reading where you left off</div>
           </div>
           <label class="toggle"><input type="checkbox" id="remember_scroll_position"
@@ -725,27 +744,147 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
       </div>
     </div>
 
-    <div class="section">
-      <h2>DNS</h2>
-      <div class="card">
+    <!-- Search -->
+    <div class="panel" id="panel-search" style="display:none">
+      <div class="page-title">Search</div>
+
+      <div class="section">
+        <div class="section-title">Default Search Engine</div>
+        <div class="section-desc">Choose a search engine or enter a custom URL. Use {{}} as placeholder for the query.</div>
         <div class="row">
-          <div class="row-label">DNS-over-HTTPS
-            <div class="restart-note">Changes require restart</div>
+          <select id="search_preset" onchange="applyPreset(this.value)" style="flex:1">
+            <option value="">Custom URL</option>
+            <optgroup label="Private">
+            <option value="https://duckduckgo.com/?q={{}}">DuckDuckGo \u2014 no tracking, US-based</option>
+            <option value="https://www.startpage.com/sp/search?query={{}}">Startpage \u2014 Google results without tracking</option>
+            <option value="https://search.brave.com/search?q={{}}">Brave Search \u2014 independent index, no tracking</option>
+            <option value="https://www.mojeek.com/search?q={{}}">Mojeek \u2014 own crawler, UK-based, no tracking</option>
+            <option value="https://www.qwant.com/?q={{}}">Qwant \u2014 EU-based, GDPR-native privacy</option>
+            <option value="https://www.ecosia.org/search?q={{}}">Ecosia \u2014 plants trees, privacy-respecting</option>
+            </optgroup>
+            <optgroup label="Power User">
+            <option value="https://kagi.com/search?q={{}}">Kagi \u2014 paid, no ads, excellent results</option>
+            <option value="https://search.marginalia.nu/search?query={{}}">Marginalia \u2014 indie sites, non-commercial web</option>
+            <option value="https://wiby.me/?q={{}}">Wiby \u2014 lightweight/personal sites, old-school web</option>
+            </optgroup>
+            <optgroup label="Standard (trackers blocked by Shroudbyte)">
+            <option value="https://www.google.com/search?q={{}}">Google \u2014 best results, tracking blocked by browser</option>
+            <option value="https://www.bing.com/search?q={{}}">Bing \u2014 Microsoft search, tracking blocked by browser</option>
+            <option value="https://search.yahoo.com/search?p={{}}">Yahoo \u2014 Bing-powered, tracking blocked by browser</option>
+            <option value="https://yandex.com/search/?text={{}}">Yandex \u2014 Russian search engine, tracking blocked by browser</option>
+            </optgroup>
+          </select>
+        </div>
+        <div class="row">
+          <div class="row-label">Search URL</div>
+          <input type="text" id="search_engine"
+            value="{html_mod.escape(settings.get('search_engine', ''))}"
+            placeholder="https://duckduckgo.com/?q={{}}"
+            style="font-family:monospace;font-size:12px;">
+        </div>
+      </div>
+    </div>
+
+    <!-- Privacy & Security -->
+    <div class="panel" id="panel-privacy" style="display:none">
+      <div class="page-title">Privacy &amp; Security</div>
+
+      <div class="section">
+        <div class="section-title">Tracking Protection</div>
+        <div class="row">
+          <div class="row-label">Ad blocker
+            <div class="row-hint">Block ads and trackers at the network level</div>
           </div>
+          <label class="toggle"><input type="checkbox" id="enable_adblock"
+            {_chk('enable_adblock', True)}><span class="slider"></span></label>
+        </div>
+        <div class="row">
+          <div class="row-label">Strip tracking parameters
+            <div class="row-hint">Remove utm_source, fbclid, gclid, etc. from URLs</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="strip_tracking"
+            {_chk('strip_tracking', True)}><span class="slider"></span></label>
+        </div>
+        <div class="row">
+          <div class="row-label">Do Not Track header
+            <div class="row-hint">Send DNT: 1 with every request</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="do_not_track"
+            {_chk('do_not_track', True)}><span class="slider"></span></label>
+        </div>
+        <div class="row">
+          <div class="row-label">Link Intelligence
+            <div class="row-hint">Hover links to preview redirect chains and trackers</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="link_intelligence"
+            {_chk('link_intelligence', True)}><span class="slider"></span></label>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Security</div>
+        <div class="row">
+          <div class="row-label">HTTPS-only mode
+            <div class="row-hint">Automatically upgrade HTTP connections to HTTPS</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="https_only"
+            {_chk('https_only')}><span class="slider"></span></label>
+        </div>
+        <div class="row">
+          <div class="row-label">Fingerprint resistance
+            <div class="row-hint">Reduce browser fingerprinting surface</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="fingerprint_resistance"
+            {_chk('fingerprint_resistance')}><span class="slider"></span></label>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Cookies &amp; Data</div>
+        <div class="row">
+          <div class="row-label">Auto-delete cookies
+            <div class="row-hint">Delete cookies when you close the last tab for a site</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="auto_delete_cookies"
+            {_chk('auto_delete_cookies')}><span class="slider"></span></label>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Page Watches</div>
+        <div class="row">
+          <div class="row-label">Default check interval
+            <div class="row-hint">How often to check watched pages for changes</div>
+          </div>
+          <input type="number" id="page_watch_interval" min="1" max="1440"
+            value="{settings.get('page_watch_interval', 3600) // 60}"
+            style="width:80px;flex:none">&nbsp;min
+        </div>
+      </div>
+    </div>
+
+    <!-- DNS -->
+    <div class="panel" id="panel-dns" style="display:none">
+      <div class="page-title">DNS</div>
+
+      <div class="section">
+        <div class="section-title">DNS-over-HTTPS</div>
+        <div class="section-desc">Encrypt DNS queries. Changes require a browser restart.</div>
+        <div class="row">
+          <div class="row-label">Mode</div>
           <select id="dns_over_https" {dns_disabled}>{doh_options}</select>
         </div>
         <div class="row">
-          <div class="row-label">DoH Provider URL</div>
+          <div class="row-label">Provider URL</div>
           <input type="text" id="dns_over_https_provider" {dns_disabled}
             value="{html_mod.escape(settings.get('dns_over_https_provider', ''))}"
             placeholder="https://dns.cloudflare.com/dns-query">
         </div>
       </div>
-    </div>
 
-    <div class="section">
-      <h2>Shroud DNS</h2>
-      <div class="card">
+      <div class="section">
+        <div class="section-title">Shroud DNS</div>
+        <div class="section-desc">Connect to your own Shroud DNS server for authenticated DNS resolution. Overrides DNS-over-HTTPS when registered.</div>
         <div class="row">
           <div class="row-label">Server</div>
           <div class="dns-row">
@@ -761,29 +900,46 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
           <span class="dns-status" style="color:{dns_status_color}">{dns_status_text}</span>
         </div>
         <div class="row">
-          <div class="row-label">Fallback to system DNS</div>
+          <div class="row-label">Fallback to system DNS
+            <div class="row-hint">Use system resolver if Shroud DNS server is unreachable</div>
+          </div>
           <label class="toggle"><input type="checkbox" id="custom_dns_fallback"
             {_chk('custom_dns_fallback', True)}><span class="slider"></span></label>
         </div>
       </div>
     </div>
 
-    <div class="save-bar">
-      <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
-    </div>
+  </div><!-- .main -->
 
-    <div class="footer">
-      {page_links}
-    </div>
+  <!-- Save bar -->
+  <div class="save-bar">
+    <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
   </div>
 
   <div class="toast" id="toast"></div>
 
   <script>
+    // ── Sidebar navigation ──
+    function showSection(name, el) {{
+      document.querySelectorAll('.panel').forEach(function(p) {{ p.style.display = 'none'; }});
+      document.getElementById('panel-' + name).style.display = '';
+      document.querySelectorAll('.nav-item').forEach(function(n) {{ n.classList.remove('active'); }});
+      if (el) el.classList.add('active');
+      // Update URL hash without scrolling
+      history.replaceState(null, '', '#' + name);
+    }}
+    // Restore section from hash on load
+    (function() {{
+      var hash = location.hash.replace('#', '');
+      if (hash && document.getElementById('panel-' + hash)) {{
+        showSection(hash, document.querySelector('.nav-item[href="#' + hash + '"]'));
+      }}
+    }})();
+
+    // ── Search preset ──
     function applyPreset(url) {{
       if (url) document.getElementById('search_engine').value = url;
     }}
-    // Auto-select matching preset on load
     (function() {{
       var cur = document.getElementById('search_engine').value;
       var sel = document.getElementById('search_preset');
@@ -794,6 +950,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
       }}
     }})();
 
+    // ── Settings I/O ──
     function getVal(id) {{
       var el = document.getElementById(id);
       if (!el) return null;
@@ -960,65 +1117,25 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
                 'Right-click any page and choose "Watch This Page".</div>'
             )
 
-        page_links = "\n      ".join(
-            f'<a href="shroud://{name}">shroud://{name}</a>'
-            for name in _PAGES
-        )
+        content = f"""
+    <div class="stat-row">
+      <div class="stat-card">
+        <div class="stat-num">{len(watches)}</div>
+        <div class="stat-label">Total</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">{active}</div>
+        <div class="stat-label">Active</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">{total_changes}</div>
+        <div class="stat-label">Changes</div>
+      </div>
+    </div>
 
-        return f"""<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><title>Page Watches &mdash; {__app_name__}</title>
-<style>
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  body {{
-    background: {BG_DARK}; color: {TEXT};
-    font-family: 'Cantarell', 'Noto Sans', system-ui, sans-serif;
-    display: flex; flex-direction: column; align-items: center;
-    min-height: 100vh; padding-top: 8vh; padding-bottom: 8vh;
-  }}
-  .bg-glow {{
-    position: fixed; top: 14%; left: 50%;
-    transform: translate(-50%, -50%);
-    width: 800px; height: 500px;
-    background: radial-gradient(ellipse, rgba(205, 141, 106, 0.04) 0%, transparent 65%);
-    pointer-events: none; z-index: 0;
-  }}
-  .content {{
-    position: relative; z-index: 2;
-    display: flex; flex-direction: column; align-items: center;
-    width: 100%; max-width: 680px; padding: 0 24px;
-  }}
-  .wordmark {{
-    font-size: 28px; font-weight: 700;
-    letter-spacing: 6px; text-transform: uppercase; text-indent: 6px;
-    background: linear-gradient(
-      135deg, {ACCENT_HOVER} 0%, {ACCENT} 35%, {ACCENT_TEXT} 65%, {ACCENT} 100%
-    );
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    margin-bottom: 6px; user-select: none;
-  }}
-  .subtitle {{
-    font-size: 11px; color: {TEXT_FAINT};
-    letter-spacing: 3px; text-transform: uppercase;
-    margin-bottom: 32px;
-  }}
-  .overview {{
-    display: grid; grid-template-columns: repeat(3, 1fr);
-    gap: 12px; width: 100%; margin-bottom: 32px;
-  }}
-  .stat-card {{
-    background: {BG_CARD}; border: 1px solid {BORDER};
-    border-radius: 10px; padding: 16px; text-align: center;
-  }}
-  .stat-num {{
-    font-size: 28px; font-weight: 700;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    color: {ACCENT};
-  }}
-  .stat-label {{
-    font-size: 10px; color: {TEXT_FAINT};
-    text-transform: uppercase; letter-spacing: 1px; margin-top: 4px;
-  }}
+    {cards}"""
+
+        extra_css = f"""
   .watch-card {{
     width: 100%; background: {BG_CARD};
     border: 1px solid {BORDER}; border-radius: 12px;
@@ -1037,27 +1154,6 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
     display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
   }}
   .watch-actions {{ display: flex; gap: 6px; flex-wrap: wrap; }}
-  .dot {{
-    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-    flex-shrink: 0;
-  }}
-  .dot.green {{ background: {GREEN}; }}
-  .dot.dim {{ background: {TEXT_FAINT}; }}
-  .act-btn {{
-    padding: 4px 12px; font-size: 11px; font-weight: 500;
-    border: 1px solid {BORDER}; border-radius: 5px;
-    background: {BG_MID}; color: {TEXT_DIM};
-    cursor: pointer; transition: all 0.15s ease;
-    font-family: inherit; text-decoration: none;
-    display: inline-block;
-  }}
-  .act-btn:hover {{
-    background: {ACCENT}; border-color: {ACCENT}; color: {BG_DARK};
-  }}
-  .act-btn.danger {{ border-color: {RED}; color: {RED}; background: transparent; }}
-  .act-btn.danger:hover {{ background: {RED}; color: {BG_DARK}; }}
-  .act-btn.visit {{ border-color: {GREEN}; color: {GREEN}; background: transparent; }}
-  .act-btn.visit:hover {{ background: {GREEN}; color: {BG_DARK}; }}
   .interval-sel {{
     padding: 2px 6px; font-size: 11px;
     background: {BG_DARK}; color: {TEXT_DIM};
@@ -1080,78 +1176,18 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
   .diff-add {{ color: {GREEN}; }}
   .diff-del {{ color: {RED}; }}
   .diff-hunk {{ color: {YELLOW}; }}
-  .diff-ctx {{ color: {TEXT_FAINT}; }}
-  .empty {{
-    text-align: center; padding: 40px 20px;
-    color: {TEXT_FAINT}; font-size: 14px;
-  }}
-  .footer {{
-    margin-top: 24px;
-    display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
-  }}
-  .footer a {{
-    padding: 8px 16px;
-    background: rgba(28, 27, 36, 0.6);
-    border: 1px solid rgba(40, 38, 51, 0.5);
-    border-radius: 8px; text-decoration: none;
-    color: {ACCENT}; font-size: 13px;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    transition: all 0.2s ease;
-  }}
-  .footer a:hover {{
-    background: rgba(38, 36, 48, 0.85);
-    border-color: rgba(205, 141, 106, 0.3);
-    transform: translateY(-1px);
-  }}
-  @keyframes fadeIn {{
-    from {{ opacity: 0; transform: translateY(10px); }}
-    to   {{ opacity: 1; transform: translateY(0); }}
-  }}
-  .wordmark    {{ animation: fadeIn 0.5s ease 0.04s both; }}
-  .subtitle    {{ animation: fadeIn 0.5s ease 0.10s both; }}
-  .overview    {{ animation: fadeIn 0.5s ease 0.18s both; }}
-  .watch-card  {{ animation: fadeIn 0.4s ease 0.26s both; }}
-  .footer      {{ animation: fadeIn 0.5s ease 0.34s both; }}
-</style>
-</head>
-<body>
-  <div class="bg-glow"></div>
-  <div class="content">
-    <div class="wordmark">Watches</div>
-    <div class="subtitle">Page Change Monitor</div>
+  .diff-ctx {{ color: {TEXT_FAINT}; }}"""
 
-    <div class="overview">
-      <div class="stat-card">
-        <div class="stat-num">{len(watches)}</div>
-        <div class="stat-label">Total</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-num">{active}</div>
-        <div class="stat-label">Active</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-num">{total_changes}</div>
-        <div class="stat-label">Changes</div>
-      </div>
-    </div>
-
-    {cards}
-
-    <div class="footer">
-      {page_links}
-    </div>
-  </div>
-
-  <script>
-    function watchAct(action, url, extra) {{
-      console.log('__SHROUD_WATCH__:' + JSON.stringify({{
+        extra_js = """
+    function watchAct(action, url, extra) {
+      console.log('__SHROUD_WATCH__:' + JSON.stringify({
         action: action, url: url || '', interval: extra || ''
-      }}));
-      setTimeout(function() {{ location.reload(); }}, 300);
-    }}
-  </script>
-</body>
-</html>"""
+      }));
+      setTimeout(function() { location.reload(); }, 300);
+    }"""
+
+        return self._wrap("Page Watches", "watches", content,
+                          extra_css=extra_css, extra_js=extra_js)
 
     def _page_privacy(self):
         """Generate the shroud://privacy global privacy dashboard."""
@@ -1308,217 +1344,8 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
       <div class="info-card"><table class="req-table">{exc_rows}</table></div>
     </div>"""
 
-        page_links = "\n      ".join(
-            f'<a href="shroud://{name}">shroud://{name}</a>'
-            for name in _PAGES
-        )
-
-        return f"""<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><title>Privacy Dashboard &mdash; {__app_name__}</title>
-<style>
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  body {{
-    background: {BG_DARK}; color: {TEXT};
-    font-family: 'Cantarell', 'Noto Sans', system-ui, sans-serif;
-    display: flex; flex-direction: column; align-items: center;
-    min-height: 100vh; padding-top: 8vh; padding-bottom: 8vh;
-  }}
-  .bg-glow {{
-    position: fixed; top: 14%; left: 50%;
-    transform: translate(-50%, -50%);
-    width: 800px; height: 500px;
-    background: radial-gradient(ellipse, rgba(205, 141, 106, 0.04) 0%, transparent 65%);
-    pointer-events: none; z-index: 0;
-  }}
-  .content {{
-    position: relative; z-index: 2;
-    display: flex; flex-direction: column; align-items: center;
-    width: 100%; max-width: 680px; padding: 0 24px;
-  }}
-  .wordmark {{
-    font-size: 28px; font-weight: 700;
-    letter-spacing: 6px; text-transform: uppercase; text-indent: 6px;
-    background: linear-gradient(
-      135deg, {ACCENT_HOVER} 0%, {ACCENT} 35%, {ACCENT_TEXT} 65%, {ACCENT} 100%
-    );
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    margin-bottom: 6px; user-select: none;
-  }}
-  .subtitle {{
-    font-size: 11px; color: {TEXT_FAINT};
-    letter-spacing: 3px; text-transform: uppercase;
-    margin-bottom: 32px;
-  }}
-
-  /* Overview cards */
-  .overview {{
-    display: grid; grid-template-columns: repeat(4, 1fr);
-    gap: 12px; width: 100%; margin-bottom: 32px;
-  }}
-  .stat-card {{
-    background: {BG_CARD}; border: 1px solid {BORDER};
-    border-radius: 10px; padding: 16px; text-align: center;
-  }}
-  .stat-num {{
-    font-size: 28px; font-weight: 700;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  }}
-  .stat-num.blocked {{ color: {RED}; }}
-  .stat-num.third-party {{ color: {YELLOW}; }}
-  .stat-num.stripped {{ color: {ACCENT}; }}
-  .stat-num.cookies {{ color: {GREEN}; }}
-  .stat-label {{
-    font-size: 10px; color: {TEXT_FAINT};
-    text-transform: uppercase; letter-spacing: 1px;
-    margin-top: 4px;
-  }}
-
-  /* Sections */
-  .section {{
-    width: 100%; margin-bottom: 24px;
-  }}
-  .section h2 {{
-    font-size: 11px; text-transform: uppercase;
-    letter-spacing: 3px; color: {TEXT_FAINT};
-    font-weight: 600; margin-bottom: 10px; padding-left: 4px;
-  }}
-  .info-card {{
-    width: 100%; background: {BG_CARD};
-    border: 1px solid {BORDER}; border-radius: 12px;
-    padding: 8px 16px; overflow: hidden;
-  }}
-
-  /* Site cards */
-  .site-card {{
-    width: 100%; background: {BG_CARD};
-    border: 1px solid {BORDER}; border-radius: 12px;
-    padding: 14px 18px; margin-bottom: 10px;
-  }}
-  .site-header {{
-    display: flex; justify-content: space-between;
-    align-items: center; margin-bottom: 8px;
-  }}
-  .site-name {{
-    font-size: 14px; font-weight: 600; color: {TEXT};
-  }}
-  .site-stats {{
-    font-size: 11px; color: {TEXT_FAINT};
-  }}
-
-  /* Request table */
-  .req-table {{ width: 100%; border-collapse: collapse; }}
-  .req-table td {{ padding: 5px 0; font-size: 12px; }}
-  .req-table td.dot-cell {{ width: 18px; }}
-  .req-table td.domain {{ color: {TEXT_DIM}; }}
-  .req-table td.count {{
-    text-align: right; color: {TEXT_FAINT};
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: 11px;
-  }}
-  .req-table td.perm-feat {{
-    color: {TEXT_DIM}; font-family: monospace; font-size: 11px;
-  }}
-  .req-table td.perm-dec {{
-    text-align: right; font-size: 11px;
-  }}
-  .req-table tr + tr td {{ border-top: 1px solid {BORDER}; }}
-
-  .dot {{
-    display: inline-block; width: 8px; height: 8px;
-    border-radius: 50%;
-  }}
-  .dot.red {{ background: {RED}; }}
-  .dot.green {{ background: {GREEN}; }}
-  .dot.yellow {{ background: {YELLOW}; }}
-
-  .params-row {{
-    margin-top: 8px; padding-top: 8px;
-    border-top: 1px solid {BORDER};
-    display: flex; gap: 6px; flex-wrap: wrap;
-  }}
-  .param-tag {{
-    display: inline-block;
-    padding: 2px 8px; border-radius: 4px;
-    font-size: 10px; font-family: monospace;
-    background: rgba(212, 168, 87, 0.12);
-    color: {YELLOW};
-    border: 1px solid rgba(212, 168, 87, 0.2);
-  }}
-
-  .empty {{
-    text-align: center; padding: 40px 20px;
-    color: {TEXT_FAINT}; font-size: 14px;
-  }}
-
-  /* Action buttons */
-  .act-cell {{ text-align: right; width: 80px; }}
-  .act-btn {{
-    padding: 3px 10px; font-size: 11px; font-weight: 500;
-    border: 1px solid {BORDER}; border-radius: 5px;
-    background: {BG_MID}; color: {TEXT_DIM};
-    cursor: pointer; transition: all 0.15s ease;
-    font-family: inherit;
-  }}
-  .act-btn:hover {{
-    background: {ACCENT}; border-color: {ACCENT};
-    color: {BG_DARK};
-  }}
-  .act-btn.danger {{ border-color: {RED}; color: {RED}; background: transparent; }}
-  .act-btn.danger:hover {{ background: {RED}; color: {BG_DARK}; }}
-  .reload-banner {{
-    position: fixed; bottom: 0; left: 0; right: 0;
-    background: {BG_CARD}; border-top: 1px solid {ACCENT};
-    padding: 10px 24px; text-align: center;
-    font-size: 13px; color: {ACCENT_TEXT}; z-index: 100;
-    display: none;
-  }}
-  .reload-banner button {{
-    margin-left: 12px; padding: 5px 16px; font-size: 12px;
-    border: none; border-radius: 6px;
-    background: {ACCENT}; color: {BG_DARK};
-    cursor: pointer; font-weight: 600; font-family: inherit;
-  }}
-  .reload-banner button:hover {{ background: {ACCENT_HOVER}; }}
-
-  .footer {{
-    margin-top: 16px;
-    display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
-  }}
-  .footer a {{
-    padding: 8px 16px;
-    background: rgba(28, 27, 36, 0.6);
-    border: 1px solid rgba(40, 38, 51, 0.5);
-    border-radius: 8px; text-decoration: none;
-    color: {ACCENT}; font-size: 13px;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    transition: all 0.2s ease;
-  }}
-  .footer a:hover {{
-    background: rgba(38, 36, 48, 0.85);
-    border-color: rgba(205, 141, 106, 0.3);
-    transform: translateY(-1px);
-  }}
-
-  @keyframes fadeIn {{
-    from {{ opacity: 0; transform: translateY(10px); }}
-    to   {{ opacity: 1; transform: translateY(0); }}
-  }}
-  .wordmark  {{ animation: fadeIn 0.5s ease 0.04s both; }}
-  .subtitle  {{ animation: fadeIn 0.5s ease 0.10s both; }}
-  .overview  {{ animation: fadeIn 0.5s ease 0.18s both; }}
-  .section   {{ animation: fadeIn 0.5s ease 0.26s both; }}
-  .site-card {{ animation: fadeIn 0.4s ease 0.30s both; }}
-  .footer    {{ animation: fadeIn 0.5s ease 0.40s both; }}
-</style>
-</head>
-<body>
-  <div class="bg-glow"></div>
-  <div class="content">
-    <div class="wordmark">Privacy</div>
-    <div class="subtitle">Privacy Dashboard</div>
-
-    <div class="overview">
+        content = f"""
+    <div class="stat-row" style="grid-template-columns: repeat(4, 1fr);">
       <div class="stat-card">
         <div class="stat-num blocked">{total_blocked}</div>
         <div class="stat-label">Blocked</div>
@@ -1558,28 +1385,98 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
 
     {exc_section}
 
-    <div class="footer">
-      {page_links}
-    </div>
-  </div>
+    <div class="reload-banner" id="reloadBanner">
+      Changes saved. Reload affected tabs for them to take effect.
+      <button onclick="location.reload()">Refresh dashboard</button>
+    </div>"""
 
-  <div class="reload-banner" id="reloadBanner">
-    Changes saved. Reload affected tabs for them to take effect.
-    <button onclick="location.reload()">Refresh dashboard</button>
-  </div>
+        extra_css = f"""
+  .stat-num.blocked {{ color: {RED}; }}
+  .stat-num.third-party {{ color: {YELLOW}; }}
+  .stat-num.stripped {{ color: {ACCENT}; }}
+  .stat-num.cookies {{ color: {GREEN}; }}
+  .section h2 {{
+    font-size: 11px; text-transform: uppercase;
+    letter-spacing: 3px; color: {TEXT_FAINT};
+    font-weight: 600; margin-bottom: 10px; padding-left: 4px;
+  }}
+  .info-card {{
+    width: 100%; background: {BG_CARD};
+    border: 1px solid {BORDER}; border-radius: 12px;
+    padding: 8px 16px; overflow: hidden;
+  }}
+  .site-card {{
+    width: 100%; background: {BG_CARD};
+    border: 1px solid {BORDER}; border-radius: 12px;
+    padding: 14px 18px; margin-bottom: 10px;
+  }}
+  .site-header {{
+    display: flex; justify-content: space-between;
+    align-items: center; margin-bottom: 8px;
+  }}
+  .site-name {{
+    font-size: 14px; font-weight: 600; color: {TEXT};
+  }}
+  .site-stats {{
+    font-size: 11px; color: {TEXT_FAINT};
+  }}
+  .req-table {{ width: 100%; border-collapse: collapse; }}
+  .req-table td {{ padding: 5px 0; font-size: 12px; }}
+  .req-table td.dot-cell {{ width: 18px; }}
+  .req-table td.domain {{ color: {TEXT_DIM}; }}
+  .req-table td.count {{
+    text-align: right; color: {TEXT_FAINT};
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 11px;
+  }}
+  .req-table td.perm-feat {{
+    color: {TEXT_DIM}; font-family: monospace; font-size: 11px;
+  }}
+  .req-table td.perm-dec {{
+    text-align: right; font-size: 11px;
+  }}
+  .req-table tr + tr td {{ border-top: 1px solid {BORDER}; }}
+  .params-row {{
+    margin-top: 8px; padding-top: 8px;
+    border-top: 1px solid {BORDER};
+    display: flex; gap: 6px; flex-wrap: wrap;
+  }}
+  .param-tag {{
+    display: inline-block;
+    padding: 2px 8px; border-radius: 4px;
+    font-size: 10px; font-family: monospace;
+    background: rgba(212, 168, 87, 0.12);
+    color: {YELLOW};
+    border: 1px solid rgba(212, 168, 87, 0.2);
+  }}
+  .act-cell {{ text-align: right; width: 80px; }}
+  .reload-banner {{
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: {BG_CARD}; border-top: 1px solid {ACCENT};
+    padding: 10px 24px; text-align: center;
+    font-size: 13px; color: {ACCENT_TEXT}; z-index: 100;
+    display: none;
+  }}
+  .reload-banner button {{
+    margin-left: 12px; padding: 5px 16px; font-size: 12px;
+    border: none; border-radius: 6px;
+    background: {ACCENT}; color: {BG_DARK};
+    cursor: pointer; font-weight: 600; font-family: inherit;
+  }}
+  .reload-banner button:hover {{ background: {ACCENT_HOVER}; }}"""
 
-  <script>
-    function privacyAct(action, arg1, arg2) {{
-      console.log('__SHROUD_PRIVACY__:' + JSON.stringify({{
+        extra_js = """
+    function privacyAct(action, arg1, arg2) {
+      console.log('__SHROUD_PRIVACY__:' + JSON.stringify({
         action: action, arg1: arg1 || '', arg2: arg2 || ''
-      }}));
+      }));
       // Show reload banner and refresh page after Python processes
       document.getElementById('reloadBanner').style.display = 'block';
-      setTimeout(function() {{ location.reload(); }}, 200);
-    }}
-  </script>
-</body>
-</html>"""
+      setTimeout(function() { location.reload(); }, 200);
+    }"""
+
+        return self._wrap("Privacy Dashboard", "privacy", content,
+                          extra_css=extra_css, extra_js=extra_js)
 
     def _page_about(self):
         from PyQt6.QtCore import PYQT_VERSION_STR, qVersion
@@ -1635,43 +1532,19 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
             for name in _PAGES
         )
 
-        return f"""<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><title>About {__app_name__}</title>
-<style>
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  body {{
-    background: {BG_DARK}; color: {TEXT};
-    font-family: 'Cantarell', 'Noto Sans', system-ui, sans-serif;
-    display: flex; flex-direction: column; align-items: center;
-    min-height: 100vh; padding-top: 16vh;
-  }}
-  .bg-glow {{
-    position: fixed; top: 18%; left: 50%;
-    transform: translate(-50%, -50%);
-    width: 800px; height: 500px;
-    background: radial-gradient(ellipse, rgba(205, 141, 106, 0.04) 0%, transparent 65%);
-    pointer-events: none; z-index: 0;
-  }}
-  .content {{
-    position: relative; z-index: 2;
-    display: flex; flex-direction: column; align-items: center;
-    width: 100%; max-width: 520px; padding: 0 24px;
-  }}
-  .wordmark {{
-    font-size: 32px; font-weight: 700;
-    letter-spacing: 8px; text-transform: uppercase; text-indent: 8px;
-    background: linear-gradient(
-      135deg, {ACCENT_HOVER} 0%, {ACCENT} 35%, {ACCENT_TEXT} 65%, {ACCENT} 100%
-    );
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    margin-bottom: 6px; user-select: none;
-  }}
-  .version {{
-    font-size: 11px; color: {TEXT_FAINT};
-    letter-spacing: 3px; text-transform: uppercase;
-    margin-bottom: 40px;
-  }}
+        content = f"""
+    <div class="section-desc">Version {__version__}</div>
+    <div class="info-card">
+      <table>
+{table_rows}
+      </table>
+    </div>
+    <div class="section-label">Internal Pages</div>
+    <div class="pages">
+      {page_links}
+    </div>"""
+
+        extra_css = f"""
   .info-card {{
     width: 100%; background: {BG_CARD};
     border: 1px solid {BORDER}; border-radius: 12px;
@@ -1705,35 +1578,10 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
     background: rgba(38, 36, 48, 0.85);
     border-color: rgba(205, 141, 106, 0.3);
     transform: translateY(-1px);
-  }}
-  @keyframes fadeIn {{
-    from {{ opacity: 0; transform: translateY(10px); }}
-    to   {{ opacity: 1; transform: translateY(0); }}
-  }}
-  .wordmark      {{ animation: fadeIn 0.5s ease 0.04s both; }}
-  .version       {{ animation: fadeIn 0.5s ease 0.10s both; }}
-  .info-card     {{ animation: fadeIn 0.5s ease 0.18s both; }}
-  .section-label {{ animation: fadeIn 0.5s ease 0.26s both; }}
-  .pages         {{ animation: fadeIn 0.5s ease 0.30s both; }}
-</style>
-</head>
-<body>
-  <div class="bg-glow"></div>
-  <div class="content">
-    <div class="wordmark">Shroudbyte</div>
-    <div class="version">Version {__version__}</div>
-    <div class="info-card">
-      <table>
-{table_rows}
-      </table>
-    </div>
-    <div class="section-label">Internal Pages</div>
-    <div class="pages">
-      {page_links}
-    </div>
-  </div>
-</body>
-</html>"""
+  }}"""
+
+        return self._wrap("About Shroudbyte", "about", content,
+                          extra_css=extra_css)
 
     def _page_shortcuts(self):
         categories = [
@@ -1777,7 +1625,6 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         ]
 
         sections_html = ""
-        anim_delay = 0.18
         for cat_name, shortcuts in categories:
             rows = "\n".join(
                 f'              <tr>'
@@ -1787,7 +1634,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
                 for key, desc in shortcuts
             )
             sections_html += f"""
-    <div class="category" style="animation-delay: {anim_delay:.2f}s;">
+    <div class="category">
       <h2>{html_mod.escape(cat_name)}</h2>
       <div class="info-card">
         <table>
@@ -1795,50 +1642,10 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         </table>
       </div>
     </div>"""
-            anim_delay += 0.08
 
-        page_links = "\n      ".join(
-            f'<a href="shroud://{name}">shroud://{name}</a>'
-            for name in _PAGES
-        )
+        content = sections_html
 
-        return f"""<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><title>Keyboard Shortcuts \u2014 {__app_name__}</title>
-<style>
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  body {{
-    background: {BG_DARK}; color: {TEXT};
-    font-family: 'Cantarell', 'Noto Sans', system-ui, sans-serif;
-    display: flex; flex-direction: column; align-items: center;
-    min-height: 100vh; padding-top: 10vh; padding-bottom: 8vh;
-  }}
-  .bg-glow {{
-    position: fixed; top: 14%; left: 50%;
-    transform: translate(-50%, -50%);
-    width: 800px; height: 500px;
-    background: radial-gradient(ellipse, rgba(205, 141, 106, 0.04) 0%, transparent 65%);
-    pointer-events: none; z-index: 0;
-  }}
-  .content {{
-    position: relative; z-index: 2;
-    display: flex; flex-direction: column; align-items: center;
-    width: 100%; max-width: 600px; padding: 0 24px;
-  }}
-  .wordmark {{
-    font-size: 28px; font-weight: 700;
-    letter-spacing: 6px; text-transform: uppercase; text-indent: 6px;
-    background: linear-gradient(
-      135deg, {ACCENT_HOVER} 0%, {ACCENT} 35%, {ACCENT_TEXT} 65%, {ACCENT} 100%
-    );
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    margin-bottom: 6px; user-select: none;
-  }}
-  .subtitle {{
-    font-size: 11px; color: {TEXT_FAINT};
-    letter-spacing: 3px; text-transform: uppercase;
-    margin-bottom: 40px;
-  }}
+        extra_css = f"""
   .category {{ width: 100%; margin-bottom: 28px; }}
   .category h2 {{
     font-size: 11px; text-transform: uppercase;
@@ -1865,47 +1672,10 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
     border: 1px solid {BORDER};
     border-radius: 6px;
     line-height: 1;
-  }}
-  .footer {{
-    margin-top: 16px;
-    display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
-  }}
-  .footer a {{
-    padding: 8px 16px;
-    background: rgba(28, 27, 36, 0.6);
-    border: 1px solid rgba(40, 38, 51, 0.5);
-    border-radius: 8px; text-decoration: none;
-    color: {ACCENT}; font-size: 13px;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    transition: all 0.2s ease;
-  }}
-  .footer a:hover {{
-    background: rgba(38, 36, 48, 0.85);
-    border-color: rgba(205, 141, 106, 0.3);
-    transform: translateY(-1px);
-  }}
-  @keyframes fadeIn {{
-    from {{ opacity: 0; transform: translateY(10px); }}
-    to   {{ opacity: 1; transform: translateY(0); }}
-  }}
-  .wordmark  {{ animation: fadeIn 0.5s ease 0.04s both; }}
-  .subtitle  {{ animation: fadeIn 0.5s ease 0.10s both; }}
-  .category  {{ animation: fadeIn 0.5s ease both; }}
-  .footer    {{ animation: fadeIn 0.5s ease 0.60s both; }}
-</style>
-</head>
-<body>
-  <div class="bg-glow"></div>
-  <div class="content">
-    <div class="wordmark">Shortcuts</div>
-    <div class="subtitle">Keyboard shortcuts</div>
-{sections_html}
-    <div class="footer">
-      {page_links}
-    </div>
-  </div>
-</body>
-</html>"""
+  }}"""
+
+        return self._wrap("Keyboard Shortcuts", "shortcuts", content,
+                          extra_css=extra_css)
 
     def _page_error(self, url_str):
         safe_url = html_mod.escape(url_str)
