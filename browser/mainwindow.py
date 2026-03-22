@@ -5,6 +5,7 @@ import json
 import os
 import re
 import signal
+import sys
 import time
 from functools import partial
 
@@ -255,6 +256,15 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Profile / settings helpers
     # ------------------------------------------------------------------
+
+    def _restart_browser(self):
+        """Save state and re-exec the browser process."""
+        self._autosave_session()
+        if self._dns_proxy is not None:
+            self._dns_proxy.stop()
+        from . import __main__ as _main
+        _main.release_single_instance_lock()
+        os.execv(sys.executable, [sys.executable, "-m", "browser"])
 
     def _apply_profile_settings(self):
         settings = self._profile.settings()
@@ -931,6 +941,12 @@ class MainWindow(QMainWindow):
 
     def _filter_completions(self, text):
         """Update the proxy filter as the user types."""
+        # Don't re-filter while the user is arrowing through the popup —
+        # Qt updates the line edit text as items are highlighted, which
+        # would reset the model and snap the selection back to row 0.
+        popup = self._url_completer.popup()
+        if popup.isVisible() and popup.currentIndex().isValid():
+            return
         self._completer_proxy.setFilterFixedString(text)
 
     def _on_completion_activated(self, index):
@@ -1733,11 +1749,43 @@ class MainWindow(QMainWindow):
             f"color: {'#4caf50' if is_registered else style.TEXT_FAINT}; font-size: 11px;"
         )
 
-        register_btn = QPushButton("Register")
+        register_btn = QPushButton()
         register_btn.setStyleSheet(style.DIALOG_BTN_STYLE)
-        register_btn.setFixedWidth(90)
+
+        def _update_reg_ui():
+            registered = bool(_reg_secret[0])
+            register_btn.setText("Unregister" if registered else "Register")
+            dns_status_label.setText("Registered" if registered else "Not registered")
+            dns_status_label.setStyleSheet(
+                f"color: {'#4caf50' if registered else style.TEXT_FAINT}; font-size: 11px;"
+            )
+            custom_dns_server.setReadOnly(registered)
+
+        _update_reg_ui()
 
         def _do_register():
+            # If already registered, unregister instead
+            if _reg_secret[0]:
+                confirm = QMessageBox.question(
+                    dialog, "Shroud DNS",
+                    "Unregistering will clear your DNS credentials "
+                    "and restart the browser.\n\nContinue?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if confirm != QMessageBox.StandardButton.Yes:
+                    return
+                # Clear credentials and save immediately
+                self._settings["custom_dns_enabled"] = False
+                self._settings["custom_dns_server"] = ""
+                self._settings["custom_dns_secret"] = ""
+                self._settings["custom_dns_cert_fingerprint"] = ""
+                storage.save_settings(self._settings)
+                dialog.reject()
+                # Restart the browser
+                self._restart_browser()
+                return
+
             url = custom_dns_server.text().strip()
             if not url:
                 QMessageBox.warning(dialog, "Shroud DNS", "Enter a server URL first.")
@@ -1770,15 +1818,16 @@ class MainWindow(QMainWindow):
                 data = _json.loads(resp.read())
                 conn.close()
 
-                _reg_secret[0] = data["secret"]
-                _reg_fingerprint[0] = data.get("cert_fingerprint", "")
-                custom_dns_server.setText(base)
-                dns_status_label.setText("Registered")
-                dns_status_label.setStyleSheet("color: #4caf50; font-size: 11px;")
-                QMessageBox.information(
-                    dialog, "Shroud DNS",
-                    "Registration successful. Click Save, then restart the browser."
-                )
+                # Save credentials and restart immediately
+                self._settings["custom_dns_enabled"] = True
+                self._settings["custom_dns_server"] = base
+                self._settings["custom_dns_secret"] = data["secret"]
+                self._settings["custom_dns_cert_fingerprint"] = data.get("cert_fingerprint", "")
+                storage.save_settings(self._settings)
+                QApplication.restoreOverrideCursor()
+                dialog.reject()
+                self._restart_browser()
+                return
             except Exception as exc:
                 QMessageBox.critical(
                     dialog, "Shroud DNS",

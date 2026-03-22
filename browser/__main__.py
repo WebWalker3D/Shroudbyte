@@ -105,6 +105,15 @@ def _acquire_single_instance_lock():
         return False
 
 
+def release_single_instance_lock():
+    """Release the instance lock so a restart can re-acquire it."""
+    global _lock_file
+    if _lock_file is not None:
+        fcntl.flock(_lock_file, fcntl.LOCK_UN)
+        _lock_file.close()
+        _lock_file = None
+
+
 def _launch_splash():
     """Launch a lightweight splash window in a separate process.
 
