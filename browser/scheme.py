@@ -615,9 +615,35 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
       <div class="card">
         <div class="row">
           <div class="row-label">Search Engine</div>
-          <input type="text" id="search_engine"
-            value="{html_mod.escape(settings.get('search_engine', ''))}"
-            placeholder="https://duckduckgo.com/?q={{}}">
+          <div style="flex:1;display:flex;flex-direction:column;gap:6px;">
+            <select id="search_preset" onchange="applyPreset(this.value)"
+              style="padding:8px 12px;font-size:13px;background:{BG_DARK};color:{TEXT};border:1px solid {BORDER};border-radius:8px;cursor:pointer;font-family:inherit;">
+              <option value="">Custom URL</option>
+              <optgroup label="Private">
+              <option value="https://duckduckgo.com/?q={{}}">DuckDuckGo — no tracking, US-based</option>
+              <option value="https://www.startpage.com/sp/search?query={{}}">Startpage — Google results without tracking</option>
+              <option value="https://search.brave.com/search?q={{}}">Brave Search — independent index, no tracking</option>
+              <option value="https://www.mojeek.com/search?q={{}}">Mojeek — own crawler, UK-based, no tracking</option>
+              <option value="https://www.qwant.com/?q={{}}">Qwant — EU-based, GDPR-native privacy</option>
+              <option value="https://www.ecosia.org/search?q={{}}">Ecosia — plants trees, privacy-respecting</option>
+              </optgroup>
+              <optgroup label="Power User">
+              <option value="https://kagi.com/search?q={{}}">Kagi — paid, no ads, excellent results</option>
+              <option value="https://search.marginalia.nu/search?query={{}}">Marginalia — indie sites, non-commercial web</option>
+              <option value="https://wiby.me/?q={{}}">Wiby — lightweight/personal sites, old-school web</option>
+              </optgroup>
+              <optgroup label="Standard (trackers blocked by Shroudbyte)">
+              <option value="https://www.google.com/search?q={{}}">Google — best results, tracking blocked by browser</option>
+              <option value="https://www.bing.com/search?q={{}}">Bing — Microsoft search, tracking blocked by browser</option>
+              <option value="https://search.yahoo.com/search?p={{}}">Yahoo — Bing-powered, tracking blocked by browser</option>
+              <option value="https://yandex.com/search/?text={{}}">Yandex — Russian search engine, tracking blocked by browser</option>
+              </optgroup>
+            </select>
+            <input type="text" id="search_engine"
+              value="{html_mod.escape(settings.get('search_engine', ''))}"
+              placeholder="https://duckduckgo.com/?q={{}}"
+              style="font-size:12px;font-family:monospace;">
+          </div>
         </div>
         <div class="row">
           <div class="row-label">Default Zoom</div>
@@ -689,6 +715,13 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
             value="{settings.get('page_watch_interval', 3600) // 60}"
             style="width:80px;flex:none"> min
         </div>
+        <div class="row">
+          <div class="row-label">Remember Scroll Position
+            <div class="row-hint">Resume reading where you left off</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="remember_scroll_position"
+            {_chk('remember_scroll_position', True)}><span class="slider"></span></label>
+        </div>
       </div>
     </div>
 
@@ -747,6 +780,20 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
   <div class="toast" id="toast"></div>
 
   <script>
+    function applyPreset(url) {{
+      if (url) document.getElementById('search_engine').value = url;
+    }}
+    // Auto-select matching preset on load
+    (function() {{
+      var cur = document.getElementById('search_engine').value;
+      var sel = document.getElementById('search_preset');
+      for (var i = 0; i < sel.options.length; i++) {{
+        if (sel.options[i].value && cur.indexOf(sel.options[i].value.split('?')[0]) !== -1) {{
+          sel.selectedIndex = i; break;
+        }}
+      }}
+    }})();
+
     function getVal(id) {{
       var el = document.getElementById(id);
       if (!el) return null;
@@ -770,6 +817,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         link_intelligence: getVal('link_intelligence'),
         page_watch_interval: getVal('page_watch_interval') * 60,
         auto_delete_cookies: getVal('auto_delete_cookies'),
+        remember_scroll_position: getVal('remember_scroll_position'),
         dns_over_https: getVal('dns_over_https'),
         dns_over_https_provider: getVal('dns_over_https_provider'),
         custom_dns_fallback: getVal('custom_dns_fallback')

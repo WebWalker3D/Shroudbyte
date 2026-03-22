@@ -1102,6 +1102,17 @@ class MainWindow(QMainWindow):
     def _load_started(self, view=None):
         self._progress.setVisible(True)
         self._progress.setValue(0)
+        # Save scroll position and track previous URL before navigating away
+        if view:
+            url = view.url().toString()
+            view._prev_url = url  # used by _load_finished to detect same-page nav
+            if self._settings.get("remember_scroll_position", True):
+                if url and not url.startswith("shroud:"):
+                    view.page().runJavaScript(
+                        "(document.documentElement.scrollTop || document.body.scrollTop) "
+                        "/ Math.max(1, document.documentElement.scrollHeight - window.innerHeight)",
+                        lambda pos: storage.set_scroll_position(url, pos or 0),
+                    )
         # Dismiss autofill bar on navigation
         if self._autofill_bar:
             self._autofill_bar._remove()
@@ -1137,6 +1148,17 @@ class MainWindow(QMainWindow):
                 # Inject Link Intelligence hover tooltips
                 if self._settings.get("link_intelligence", True):
                     view.page().runJavaScript(self._get_link_intel_js())
+                # Restore scroll position (skip if same-page nav / refresh)
+                if self._settings.get("remember_scroll_position", True):
+                    cur_url = view.url().toString()
+                    prev_url = getattr(view, "_prev_url", "")
+                    if cur_url != prev_url:
+                        pos = storage.get_scroll_position(cur_url)
+                        if pos > 0.01:
+                            view.page().runJavaScript(
+                                f"window.scrollTo(0, {pos} * "
+                                f"(document.documentElement.scrollHeight - window.innerHeight));"
+                            )
             if self._vault.is_unlocked:
                 self._check_page_for_passwords()
                 self._check_session_for_credentials()
@@ -1987,6 +2009,7 @@ class MainWindow(QMainWindow):
                 "default_zoom", "user_agent", "https_only", "do_not_track",
                 "restore_session", "strip_tracking", "fingerprint_resistance",
                 "link_intelligence", "page_watch_interval", "auto_delete_cookies",
+                "remember_scroll_position",
                 "dns_over_https", "dns_over_https_provider", "custom_dns_fallback",
             ):
                 if key in s:

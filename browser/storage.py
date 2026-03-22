@@ -117,6 +117,7 @@ DEFAULT_SETTINGS = {
     "auto_delete_cookies": False,
     "link_intelligence": True,
     "page_watch_interval": 3600,
+    "remember_scroll_position": True,
 }
 
 
@@ -393,6 +394,42 @@ def update_watch(url, updates):
             w.update(updates)
             break
     save_watches(watches)
+
+
+# ---------------------------------------------------------------------------
+# Scroll position memory
+# ---------------------------------------------------------------------------
+
+_scroll_cache: dict | None = None
+_SCROLL_MAX = 2000  # max URLs to remember
+
+
+def _load_scroll_data() -> dict:
+    global _scroll_cache
+    if _scroll_cache is None:
+        _scroll_cache = _load_json("scroll_positions.json", {})
+    return _scroll_cache
+
+
+def get_scroll_position(url: str) -> float:
+    """Return saved scroll percentage (0.0–1.0) for a URL, or 0."""
+    return _load_scroll_data().get(url, 0.0)
+
+
+def set_scroll_position(url: str, position: float):
+    """Save scroll percentage for a URL."""
+    data = _load_scroll_data()
+    if position < 0.01:
+        data.pop(url, None)
+    else:
+        data[url] = round(position, 4)
+    # Evict oldest if over limit
+    if len(data) > _SCROLL_MAX:
+        keys = list(data)[:len(data) - _SCROLL_MAX]
+        for k in keys:
+            del data[k]
+    _scroll_cache.update(data)
+    _save_json("scroll_positions.json", data)
 
 
 # ---------------------------------------------------------------------------
