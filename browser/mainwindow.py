@@ -199,6 +199,16 @@ class MainWindow(QMainWindow):
         self._setup_menus()
         self._setup_shortcuts()
 
+        # Track cookies from startup for the cookie manager
+        from PyQt6.QtNetwork import QNetworkCookie
+        self._all_cookies: list = []
+        cs = self._profile.cookieStore()
+        cs.cookieAdded.connect(
+            lambda c: self._all_cookies.append(QNetworkCookie(c))
+        )
+        cs.cookieRemoved.connect(self._on_cookie_removed)
+        cs.loadAllCookies()
+
         # Auto-hide menu bar
         self.menuBar().setVisible(False)
         self._menu_visible = False
@@ -2480,6 +2490,15 @@ class MainWindow(QMainWindow):
     # Cookie manager
     # ------------------------------------------------------------------
 
+    def _on_cookie_removed(self, cookie):
+        from PyQt6.QtNetwork import QNetworkCookie
+        target = QNetworkCookie(cookie)
+        self._all_cookies[:] = [
+            c for c in self._all_cookies
+            if not (c.domain() == target.domain() and c.name() == target.name()
+                    and c.path() == target.path())
+        ]
+
     def _show_cookie_manager(self):
         dialog = QDialog(self)
         dialog.setWindowTitle("Cookie Manager")
@@ -2495,7 +2514,7 @@ class MainWindow(QMainWindow):
         search.setStyleSheet(style.SEARCH_INPUT_STYLE)
         layout.addWidget(search)
 
-        count_label = QLabel("Loading cookies...")
+        count_label = QLabel("")
         count_label.setStyleSheet(f"color: {style.TEXT_DIM}; font-size: 12px;")
         layout.addWidget(count_label)
 
@@ -2503,11 +2522,8 @@ class MainWindow(QMainWindow):
         listw.setStyleSheet(style.LIST_WIDGET_STYLE)
         layout.addWidget(listw)
 
-        cookies = []
         cookie_store = self._profile.cookieStore()
-
-        def on_cookie(cookie):
-            cookies.append(cookie)
+        cookies = self._all_cookies
 
         def populate(filter_text=""):
             listw.clear()
@@ -2530,11 +2546,7 @@ class MainWindow(QMainWindow):
                     item.setData(Qt.ItemDataRole.UserRole, c)
                     listw.addItem(item)
 
-        cookie_store.cookieAdded.connect(on_cookie)
-        cookie_store.loadAllCookies()
-
-        from PyQt6.QtCore import QTimer
-        QTimer.singleShot(500, lambda: populate())
+        populate()
         search.textChanged.connect(populate)
 
         btn_layout = QHBoxLayout()
@@ -2547,15 +2559,17 @@ class MainWindow(QMainWindow):
         close_btn = QPushButton("Close")
         close_btn.setStyleSheet(style.DIALOG_BTN_STYLE)
 
+        from PyQt6.QtCore import QTimer
+
+        def _repopulate():
+            QTimer.singleShot(100, lambda: populate(search.text()))
+
         def delete_selected():
             item = listw.currentItem()
             if item:
                 cookie = item.data(Qt.ItemDataRole.UserRole)
                 cookie_store.deleteCookie(cookie)
-                if cookie in cookies:
-                    cookies.remove(cookie)
-                listw.takeItem(listw.row(item))
-                populate(search.text())
+                _repopulate()
 
         def delete_all():
             reply = QMessageBox.question(
@@ -2564,8 +2578,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if reply == QMessageBox.StandardButton.Yes:
                 cookie_store.deleteAllCookies()
-                cookies.clear()
-                populate(search.text())
+                _repopulate()
 
         delete_btn.clicked.connect(delete_selected)
         delete_all_btn.clicked.connect(delete_all)
@@ -2577,13 +2590,6 @@ class MainWindow(QMainWindow):
         btn_layout.addWidget(close_btn)
         layout.addLayout(btn_layout)
 
-        def cleanup():
-            try:
-                cookie_store.cookieAdded.disconnect(on_cookie)
-            except Exception:
-                pass
-
-        dialog.finished.connect(cleanup)
         dialog.exec()
 
     # ------------------------------------------------------------------
@@ -2880,21 +2886,25 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def keyPressEvent(self, event):
-        # Alt toggles menu bar visibility
-        if event.key() == Qt.Key.Key_Alt and not event.modifiers() & ~Qt.KeyboardModifier.AltModifier:
-            if not self._menu_visible:
-                self.menuBar().setVisible(True)
-                self._menu_visible = True
-                self.menuBar().setFocus()
-            else:
-                self.menuBar().setVisible(False)
-                self._menu_visible = False
-            return
         # Escape closes find bar if visible
         if event.key() == Qt.Key.Key_Escape and self._find_bar.isVisible():
             self._close_find_bar()
             return
         super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        # Alt toggles menu bar visibility (on release to avoid
+        # conflicting with Qt's built-in Alt menu activation).
+        if event.key() == Qt.Key.Key_Alt and not event.isAutoRepeat():
+            if not self._menu_visible:
+                self.menuBar().setVisible(True)
+                self._menu_visible = True
+            else:
+                self.menuBar().setVisible(False)
+                self._menu_visible = False
+            event.accept()
+            return
+        super().keyReleaseEvent(event)
 
     def _on_menu_action_triggered(self, action):
         """Hide menu bar after a menu action is used."""
