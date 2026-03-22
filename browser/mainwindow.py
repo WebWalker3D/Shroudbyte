@@ -763,6 +763,10 @@ class MainWindow(QMainWindow):
                     view.page().runJavaScript(get_fingerprint_resistance_js())
             if self._vault.is_unlocked:
                 self._check_page_for_passwords()
+            # Give the web view keyboard focus on new-tab so typing
+            # reaches the page's keydown listener immediately.
+            if view and view.url().scheme() == "shroud" and view.url().host() == "newtab":
+                view.setFocus()
 
     def _install_content_blocking_script(self):
         """Install a user script that blocks ad scripts at document creation time."""
