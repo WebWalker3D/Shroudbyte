@@ -16,7 +16,11 @@ from PyQt6.QtWidgets import QApplication, QDialog, QMenu, QVBoxLayout
 
 # Shared set of hosts known NOT to require HTTP auth.
 # Populated on successful HEAD checks; avoids repeat probes.
+# Thread-safe: Python's GIL protects set.add() and `in` checks,
+# but we use a dedicated lock for correctness across Qt threads.
+import threading
 _safe_hosts: set[str] = set()
+_safe_hosts_lock = threading.Lock()
 
 
 class ShroudPage(QWebEnginePage):
@@ -141,16 +145,16 @@ class ShroudPage(QWebEnginePage):
             mw = self._get_main_window()
             has_auth = (mw and hasattr(mw, "_adblocker")
                         and host_lower in mw._adblocker._http_auth)
-            if host_lower not in _safe_hosts and not has_auth:
+            with _safe_hosts_lock:
+                already_safe = host_lower in _safe_hosts
+            if not already_safe and not has_auth:
                 if self._probe_for_auth(url.toString()):
-                    # Server requires auth — show dialog, don't let
-                    # Chromium touch this URL yet.
                     if mw:
                         QTimer.singleShot(
                             0, lambda u=QUrl(url): mw._prompt_http_auth(u))
                     return False
-                # Host doesn't need auth — remember so we skip next time
-                _safe_hosts.add(host_lower)
+                with _safe_hosts_lock:
+                    _safe_hosts.add(host_lower)
 
         if self.https_only and url.scheme() == "http" and is_main_frame:
             # Don't upgrade localhost / local network

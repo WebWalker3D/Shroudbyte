@@ -200,12 +200,9 @@ class MainWindow(QMainWindow):
         self._setup_shortcuts()
 
         # Track cookies from startup for the cookie manager
-        from PyQt6.QtNetwork import QNetworkCookie
         self._all_cookies: list = []
         cs = self._profile.cookieStore()
-        cs.cookieAdded.connect(
-            lambda c: self._all_cookies.append(QNetworkCookie(c))
-        )
+        cs.cookieAdded.connect(self._on_cookie_added)
         cs.cookieRemoved.connect(self._on_cookie_removed)
         cs.loadAllCookies()
 
@@ -2531,6 +2528,10 @@ class MainWindow(QMainWindow):
     # Cookie manager
     # ------------------------------------------------------------------
 
+    def _on_cookie_added(self, cookie):
+        from PyQt6.QtNetwork import QNetworkCookie
+        self._all_cookies.append(QNetworkCookie(cookie))
+
     def _on_cookie_removed(self, cookie):
         from PyQt6.QtNetwork import QNetworkCookie
         target = QNetworkCookie(cookie)
@@ -2540,7 +2541,34 @@ class MainWindow(QMainWindow):
                     and c.path() == target.path())
         ]
 
+    def _load_cookies_from_db(self) -> list[dict]:
+        """Read cookies directly from Chromium's SQLite database."""
+        import sqlite3
+        db_path = storage.DATA_DIR / "webengine" / "Cookies"
+        if not db_path.exists():
+            return []
+        try:
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("PRAGMA journal_mode=WAL")
+            cursor = conn.execute(
+                "SELECT host_key, name, path, value, encrypted_value, "
+                "is_httponly, is_secure, is_persistent "
+                "FROM cookies ORDER BY host_key, name"
+            )
+            rows = cursor.fetchall()
+            conn.close()
+            return [
+                {"domain": r[0], "name": r[1], "path": r[2],
+                 "httponly": bool(r[5]), "secure": bool(r[6]),
+                 "persistent": bool(r[7])}
+                for r in rows
+            ]
+        except Exception:
+            return []
+
     def _show_cookie_manager(self):
+        db_cookies = self._load_cookies_from_db()
+
         dialog = QDialog(self)
         dialog.setWindowTitle("Cookie Manager")
         dialog.setMinimumSize(620, 500)
@@ -2559,33 +2587,47 @@ class MainWindow(QMainWindow):
         count_label.setStyleSheet(f"color: {style.TEXT_DIM}; font-size: 12px;")
         layout.addWidget(count_label)
 
-        listw = QListWidget()
-        listw.setStyleSheet(style.LIST_WIDGET_STYLE)
-        layout.addWidget(listw)
+        from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem
+
+        tree = QTreeWidget()
+        tree.setHeaderHidden(True)
+        tree.setStyleSheet(style.LIST_WIDGET_STYLE)
+        tree.setRootIsDecorated(True)
+        tree.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
+        layout.addWidget(tree)
 
         cookie_store = self._profile.cookieStore()
-        cookies = self._all_cookies
+        _cookie_map = {}  # maps tree item id -> cookie dict
 
         def populate(filter_text=""):
-            listw.clear()
+            tree.clear()
+            _cookie_map.clear()
             ft = filter_text.lower()
             domains = {}
-            for c in cookies:
-                domain = c.domain()
+            for c in db_cookies:
+                domain = c["domain"]
                 if ft and ft not in domain.lower():
                     continue
                 if domain not in domains:
                     domains[domain] = []
                 domains[domain].append(c)
+            total = len(db_cookies)
+            shown = sum(len(v) for v in domains.values())
             count_label.setText(
-                f"{len(cookies)} cookies from {len(domains)} domains"
-                if not ft else f"Showing {sum(len(v) for v in domains.values())} cookies")
+                f"{total} cookies from {len(set(c['domain'] for c in db_cookies))} domains"
+                if not ft else f"Showing {shown} cookies")
             for domain in sorted(domains.keys()):
+                parent = QTreeWidgetItem(tree, [f"{domain}  ({len(domains[domain])})"])
+                parent.setForeground(0, QColor(style.ACCENT))
+                parent.setExpanded(True)
                 for c in domains[domain]:
-                    name = c.name().data().decode('utf-8', errors='replace')
-                    item = QListWidgetItem(f"{domain}  \u2014  {name}")
-                    item.setData(Qt.ItemDataRole.UserRole, c)
-                    listw.addItem(item)
+                    flags = ""
+                    if c["httponly"]:
+                        flags += " [HttpOnly]"
+                    if c["secure"]:
+                        flags += " [Secure]"
+                    child = QTreeWidgetItem(parent, [f"{c['name']}{flags}"])
+                    _cookie_map[id(child)] = c
 
         populate()
         search.textChanged.connect(populate)
@@ -2600,17 +2642,30 @@ class MainWindow(QMainWindow):
         close_btn = QPushButton("Close")
         close_btn.setStyleSheet(style.DIALOG_BTN_STYLE)
 
-        from PyQt6.QtCore import QTimer
-
-        def _repopulate():
-            QTimer.singleShot(100, lambda: populate(search.text()))
-
         def delete_selected():
-            item = listw.currentItem()
-            if item:
-                cookie = item.data(Qt.ItemDataRole.UserRole)
-                cookie_store.deleteCookie(cookie)
-                _repopulate()
+            from PyQt6.QtNetwork import QNetworkCookie
+            items = tree.selectedItems()
+            if not items:
+                return
+            to_delete = []
+            for item in items:
+                c = _cookie_map.get(id(item))
+                if c:
+                    to_delete.append(c)
+                elif item.childCount() > 0:
+                    # Domain group — collect all children
+                    for i in range(item.childCount()):
+                        cc = _cookie_map.get(id(item.child(i)))
+                        if cc:
+                            to_delete.append(cc)
+            for c in to_delete:
+                qc = QNetworkCookie(c["name"].encode(), b"")
+                qc.setDomain(c["domain"])
+                qc.setPath(c["path"])
+                cookie_store.deleteCookie(qc)
+                if c in db_cookies:
+                    db_cookies.remove(c)
+            populate(search.text())
 
         def delete_all():
             reply = QMessageBox.question(
@@ -2619,7 +2674,8 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if reply == QMessageBox.StandardButton.Yes:
                 cookie_store.deleteAllCookies()
-                _repopulate()
+                db_cookies.clear()
+                populate(search.text())
 
         delete_btn.clicked.connect(delete_selected)
         delete_all_btn.clicked.connect(delete_all)

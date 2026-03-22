@@ -1,6 +1,7 @@
 """Download shelf and download handling — Chrome/Firefox-style bottom bar."""
 
 import os
+import subprocess
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
@@ -141,7 +142,7 @@ class DownloadItem(QWidget):
     def _open_file(self):
         path = self._download.downloadDirectory() + "/" + self._download.downloadFileName()
         if os.path.exists(path):
-            os.system(f'xdg-open "{path}" &')
+            subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 class DownloadShelf(QFrame):

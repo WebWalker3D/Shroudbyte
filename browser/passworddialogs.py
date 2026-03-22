@@ -131,8 +131,8 @@ class MasterPasswordDialog(QDialog):
             if pw != self._confirm_edit.text():
                 self._show_error("Passwords do not match.")
                 return
-            if len(pw) < 4:
-                self._show_error("Password must be at least 4 characters.")
+            if len(pw) < 8:
+                self._show_error("Password must be at least 8 characters.")
                 return
             self._vault.setup(pw)
             self._chosen_backend = "master_password"
@@ -261,15 +261,24 @@ class PasswordManagerDialog(QDialog):
             )
             self._populate(self._search.text())
 
+    def _copy_to_clipboard(self, text):
+        """Copy text to clipboard and auto-clear after 30 seconds."""
+        from PyQt6.QtCore import QTimer
+        QApplication.clipboard().setText(text)
+        QTimer.singleShot(30_000, lambda: (
+            QApplication.clipboard().clear()
+            if QApplication.clipboard().text() == text else None
+        ))
+
     def _copy_username(self):
         entry = self._selected_entry()
         if entry:
-            QApplication.clipboard().setText(entry["username"])
+            self._copy_to_clipboard(entry["username"])
 
     def _copy_password(self):
         entry = self._selected_entry()
         if entry:
-            QApplication.clipboard().setText(entry["password"])
+            self._copy_to_clipboard(entry["password"])
 
     def _delete_entry(self):
         entry = self._selected_entry()

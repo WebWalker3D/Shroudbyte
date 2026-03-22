@@ -14,13 +14,6 @@ def generate_new_tab_html():
     bookmarks = storage.load_bookmarks()[:8]
     settings = storage.load_settings()
     search_url = settings.get("search_engine", "https://duckduckgo.com/?q={}")
-    # Build the search action URL (everything before the {})
-    search_action = search_url.split("?")[0] if "?" in search_url else search_url.replace("{}", "")
-    search_param = ""
-    if "?" in search_url:
-        param_part = search_url.split("?")[1]
-        if "={}" in param_part:
-            search_param = param_part.split("={}")[0]
 
     # Time-based greeting
     hour = datetime.datetime.now().hour

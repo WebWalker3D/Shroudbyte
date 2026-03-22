@@ -60,22 +60,26 @@ def build_dns_query(domain: str, qtype: int = 1) -> bytes:
     return header + question
 
 
-def parse_dns_response(data: bytes) -> list[str]:
+def parse_dns_response(data: bytes) -> tuple[list[str], int]:
     """Parse a DNS wire-format response and extract A/AAAA record addresses.
 
     Args:
         data: Raw bytes of the DNS response packet.
 
     Returns:
-        List of IP address strings.
+        Tuple of (list of IP address strings, minimum TTL in seconds).
     """
     if len(data) < 12:
-        return []
+        return [], 0
 
     # Parse header
     _id, _flags, qdcount, ancount, _nscount, _arcount = struct.unpack(
         "!HHHHHH", data[:12]
     )
+
+    # Sanity-check counts to avoid runaway parsing on malformed packets
+    if qdcount > 100 or ancount > 200:
+        return [], 0
 
     offset = 12
 
@@ -86,13 +90,14 @@ def parse_dns_response(data: bytes) -> list[str]:
 
     # Parse answer section
     addresses: list[str] = []
+    min_ttl = 0xFFFFFFFF
     for _ in range(ancount):
         offset = _skip_name(data, offset)
 
         if offset + 10 > len(data):
             break
 
-        rtype, _rclass, _ttl, rdlength = struct.unpack(
+        rtype, _rclass, ttl, rdlength = struct.unpack(
             "!HHIH", data[offset : offset + 10]
         )
         offset += 10
@@ -104,14 +109,19 @@ def parse_dns_response(data: bytes) -> list[str]:
             # A record
             octets = struct.unpack("!BBBB", data[offset : offset + 4])
             addresses.append("{}.{}.{}.{}".format(*octets))
+            min_ttl = min(min_ttl, ttl)
         elif rtype == 28 and rdlength == 16:
             # AAAA record
             addr = ipaddress.IPv6Address(data[offset : offset + 16])
             addresses.append(str(addr))
+            min_ttl = min(min_ttl, ttl)
 
         offset += rdlength
 
-    return addresses
+    if not addresses:
+        min_ttl = 0
+
+    return addresses, min_ttl
 
 
 def _skip_name(data: bytes, offset: int) -> int:

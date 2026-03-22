@@ -32,7 +32,7 @@ _gpu_flags += " --enable-gpu-rasterization"
 _gpu_flags += " --enable-zero-copy"
 _gpu_flags += " --enable-features=CanvasOopRasterization"
 _gpu_flags += " --allow-insecure-localhost"
-_gpu_flags += " --disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessRespectPreflightResults"
+_gpu_flags += " --disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessRespectPreflightResults,Translate"
 _gpu_flags += " --log-level=3"
 os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _gpu_flags.strip()
 
@@ -50,11 +50,10 @@ _dns_fingerprint = _storage.get_dns_cert_fingerprint(_settings)
 if _dns_secret and _settings.get("custom_dns_secret"):
     from . import keyring_backend as _kb
     if _kb.is_available():
-        _kb.store_secret("dns_secret", _dns_secret)
-        if _dns_fingerprint:
-            _kb.store_secret("dns_cert_fingerprint", _dns_fingerprint)
-        _settings["custom_dns_secret"] = ""
-        _settings["custom_dns_cert_fingerprint"] = ""
+        if _kb.store_secret("dns_secret", _dns_secret):
+            _settings["custom_dns_secret"] = ""
+        if _dns_fingerprint and _kb.store_secret("dns_cert_fingerprint", _dns_fingerprint):
+            _settings["custom_dns_cert_fingerprint"] = ""
         _storage.save_settings(_settings)
 
 if _settings.get("custom_dns_enabled") and _settings.get("custom_dns_server") and _dns_secret:

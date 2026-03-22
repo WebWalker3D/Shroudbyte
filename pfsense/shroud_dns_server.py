@@ -172,7 +172,10 @@ def make_handler(shared_secret: bytes, nonce_tracker: NonceTracker,
 
             try:
                 # Read body
-                content_length = int(self.headers.get("Content-Length", 0))
+                try:
+                    content_length = int(self.headers.get("Content-Length", 0))
+                except (ValueError, TypeError):
+                    content_length = 0
                 if content_length <= 0 or content_length > MAX_BODY_BYTES:
                     self._send_text(403, "forbidden")
                     return

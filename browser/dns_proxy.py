@@ -353,8 +353,8 @@ class ShroudSOCKS5Proxy:
 
         # Try pfSense DoH
         try:
-            ips = await self._resolve_doh(domain)
-            ttl = max(_MIN_TTL, min(_MAX_TTL, _MAX_TTL))
+            ips, ttl = await self._resolve_doh(domain)
+            ttl = max(_MIN_TTL, min(ttl, _MAX_TTL))
             self._dns_cache[domain] = (ips, now + ttl)
             return ips
         except Exception:
@@ -388,10 +388,10 @@ class ShroudSOCKS5Proxy:
             None, partial(self._do_https_request, wire_query, headers)
         )
 
-        ips = parse_dns_response(response_data)
+        ips, ttl = parse_dns_response(response_data)
         if not ips:
             raise OSError("DoH returned no addresses for " + domain)
-        return ips
+        return ips, ttl
 
     def _do_https_request(self, body: bytes, headers: dict) -> bytes:
         """Perform a blocking HTTPS POST with cert-fingerprint pinning.
