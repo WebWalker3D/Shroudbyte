@@ -2229,6 +2229,7 @@ class MainWindow(QMainWindow):
 
         settings = filterlists.load_list_settings()
         checkboxes = {}
+        status_labels = {}
 
         from PyQt6.QtWidgets import QScrollArea
 
@@ -2256,6 +2257,7 @@ class MainWindow(QMainWindow):
             scroll_layout.addWidget(desc)
             scroll_layout.addWidget(status)
             checkboxes[fl["id"]] = cb
+            status_labels[fl["id"]] = status
 
         scroll_layout.addStretch()
         scroll.setWidget(scroll_widget)
@@ -2281,19 +2283,61 @@ class MainWindow(QMainWindow):
         close_btn.clicked.connect(dialog.close)
 
         def save_and_update():
+            import queue
+            import threading
+            from PyQt6.QtCore import QTimer
+
             new_settings = {fid: cb.isChecked() for fid, cb in checkboxes.items()}
             filterlists.save_list_settings(new_settings)
             update_btn.setText("Downloading...")
             update_btn.setEnabled(False)
-            QApplication.processEvents()
-            filterlists.download_all_enabled()
-            self._adblocker.reload_hosts()
-            self._cosmetic_css = filterlists.get_cosmetic_css()
-            info_label.setText(f"Blocked domains: {self._adblocker.total_rules:,}")
-            update_btn.setText("Update Lists")
-            update_btn.setEnabled(True)
-            self._update_adblock_label()
-            self._status.showMessage(f"Filter lists updated — {self._adblocker.total_rules:,} domains blocked", 4000)
+
+            # Mark enabled lists as downloading
+            for fid, lbl in status_labels.items():
+                if new_settings.get(fid, False):
+                    lbl.setText("Downloading...")
+                    lbl.setStyleSheet(f"color: {style.TEXT_DIM}; font-size: 11px; margin-left: 26px;")
+
+            progress_q = queue.Queue()
+
+            def _on_item(list_id, success):
+                progress_q.put((list_id, success))
+
+            t = threading.Thread(
+                target=filterlists.download_all_enabled,
+                args=(_on_item,), daemon=True,
+            )
+            t.start()
+
+            poll = QTimer(dialog)
+
+            def _check():
+                # Drain progress updates
+                while not progress_q.empty():
+                    list_id, success = progress_q.get_nowait()
+                    lbl = status_labels.get(list_id)
+                    if lbl:
+                        lbl.setText("Updated" if success else "Failed")
+                        lbl.setStyleSheet(
+                            f"color: {style.GREEN if success else style.RED}; "
+                            f"font-size: 11px; margin-left: 26px;"
+                        )
+
+                if t.is_alive():
+                    return
+                poll.stop()
+                self._adblocker.reload_hosts()
+                self._cosmetic_css = filterlists.get_cosmetic_css()
+                info_label.setText(f"Blocked domains: {self._adblocker.total_rules:,}")
+                update_btn.setText("Update Lists")
+                update_btn.setEnabled(True)
+                self._update_adblock_label()
+                self._status.showMessage(
+                    f"Filter lists updated — {self._adblocker.total_rules:,} domains blocked", 4000
+                )
+
+            poll.timeout.connect(_check)
+            poll.start(200)
 
         def save_settings():
             new_settings = {fid: cb.isChecked() for fid, cb in checkboxes.items()}

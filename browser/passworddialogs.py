@@ -156,7 +156,7 @@ class PasswordManagerDialog(QDialog):
         super().__init__(parent)
         self._vault = vault
         self.setWindowTitle("Password Manager")
-        self.setMinimumSize(580, 480)
+        self.setMinimumSize(640, 480)
         self.setStyleSheet(style.PASSWORD_DIALOG_STYLE)
 
         layout = QVBoxLayout(self)
