@@ -727,13 +727,22 @@ class MainWindow(QMainWindow):
 
         return view
 
+    @staticmethod
+    def _get_tab_domain(view):
+        """Get the effective domain for a tab's current URL."""
+        url = view.url()
+        if url.scheme() in ("shroud", "about", "data", ""):
+            return None
+        host = url.host()
+        if not host or host in ("localhost", "127.0.0.1", "::1"):
+            return None
+        return host.lower()
+
     def _close_tab(self, index):
         widget = self._tabs.widget(index)
         if widget and getattr(widget, '_pinned', False):
             return
-        if self._tabs.count() <= 1:
-            self.close()
-            return
+
         # Save to closed tabs stack for Ctrl+Shift+T
         url = widget.url().toString()
         title = widget.title()
@@ -741,6 +750,27 @@ class MainWindow(QMainWindow):
             self._closed_tabs.append({"url": url, "title": title})
             if len(self._closed_tabs) > 20:
                 self._closed_tabs = self._closed_tabs[-20:]
+
+        # Auto-delete cookies if this is the last tab for its domain
+        if (self._settings.get("auto_delete_cookies")
+                and not self._private_mode):
+            closing_domain = self._get_tab_domain(widget)
+            if closing_domain and not storage.is_cookie_whitelisted(closing_domain):
+                is_last = True
+                for i in range(self._tabs.count()):
+                    if i == index:
+                        continue
+                    other = self._tabs.widget(i)
+                    if other and self._get_tab_domain(other) == closing_domain:
+                        is_last = False
+                        break
+                if is_last:
+                    self._delete_cookies_for_domain(closing_domain)
+
+        if self._tabs.count() <= 1:
+            self.close()
+            return
+
         self._tabs.removeTab(index)
         widget.deleteLater()
 
@@ -776,6 +806,24 @@ class MainWindow(QMainWindow):
                     if idx >= 0:
                         self._close_tab(idx)
                 return
+
+        # Auto-delete cookies when navigating away from a domain
+        if (self._settings.get("auto_delete_cookies")
+                and not self._private_mode):
+            new_domain = self._get_tab_domain(view)
+            old_domain = getattr(view, "_last_domain", None)
+            view._last_domain = new_domain
+            if (old_domain and old_domain != new_domain
+                    and not storage.is_cookie_whitelisted(old_domain)):
+                # Check if any other tab still has this domain
+                still_open = False
+                for i in range(self._tabs.count()):
+                    other = self._tabs.widget(i)
+                    if other is not view and other and self._get_tab_domain(other) == old_domain:
+                        still_open = True
+                        break
+                if not still_open:
+                    self._delete_cookies_for_domain(old_domain)
 
         if view == self._current_view():
             self._update_url_bar(url)
@@ -1738,6 +1786,13 @@ class MainWindow(QMainWindow):
         fp_check = QCheckBox("Enabled")
         fp_check.setChecked(self._settings.get("fingerprint_resistance", False))
 
+        auto_del_check = QCheckBox("Enabled")
+        auto_del_check.setChecked(self._settings.get("auto_delete_cookies", False))
+        auto_del_check.setToolTip(
+            "Automatically delete cookies when you close the last tab for a site.\n"
+            "Whitelist sites you want to stay logged into via the Cookie Manager."
+        )
+
         from PyQt6.QtWidgets import QComboBox
         doh_combo = QComboBox()
         doh_combo.addItems(["off", "automatic", "secure"])
@@ -1763,6 +1818,7 @@ class MainWindow(QMainWindow):
         layout.addRow("Do Not Track", dnt_check)
         layout.addRow("Strip Tracking Params", strip_check)
         layout.addRow("Fingerprint Resistance", fp_check)
+        layout.addRow("Auto-Delete Cookies", auto_del_check)
         layout.addRow("DNS-over-HTTPS", doh_combo)
 
         doh_provider_edit = QLineEdit(self._settings.get(
@@ -1953,6 +2009,7 @@ class MainWindow(QMainWindow):
             self._settings["restore_session"] = session_check.isChecked()
             self._settings["strip_tracking"] = strip_check.isChecked()
             self._settings["fingerprint_resistance"] = fp_check.isChecked()
+            self._settings["auto_delete_cookies"] = auto_del_check.isChecked()
             self._settings["dns_over_https"] = doh_combo.currentText()
             self._settings["dns_over_https_provider"] = doh_provider_edit.text().strip()
             server_url = custom_dns_server.text().strip()
@@ -2528,6 +2585,65 @@ class MainWindow(QMainWindow):
     # Cookie manager
     # ------------------------------------------------------------------
 
+    def _delete_cookies_from_db(self, cookies: list[dict]) -> int:
+        """Delete specific cookies directly from Chromium's SQLite database."""
+        import sqlite3
+        db_path = storage.DATA_DIR / "webengine" / "Cookies"
+        if not db_path.exists():
+            return 0
+        try:
+            conn = sqlite3.connect(str(db_path))
+            deleted = 0
+            for c in cookies:
+                conn.execute(
+                    "DELETE FROM cookies WHERE host_key = ? AND name = ? AND path = ?",
+                    (c["domain"], c["name"], c["path"]),
+                )
+                deleted += conn.total_changes if deleted == 0 else 0
+            conn.commit()
+            deleted = conn.total_changes
+            conn.close()
+            # Tell Chromium to reload from disk
+            self._profile.cookieStore().loadAllCookies()
+            return deleted
+        except Exception:
+            return 0
+
+    def _delete_all_cookies_from_db(self) -> int:
+        """Delete all cookies from Chromium's SQLite database."""
+        import sqlite3
+        db_path = storage.DATA_DIR / "webengine" / "Cookies"
+        if not db_path.exists():
+            return 0
+        try:
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("DELETE FROM cookies")
+            conn.commit()
+            deleted = conn.total_changes
+            conn.close()
+            self._profile.cookieStore().loadAllCookies()
+            return deleted
+        except Exception:
+            return 0
+
+    def _delete_cookies_for_domain(self, domain):
+        """Delete all cookies whose domain matches the given host."""
+        db_cookies = self._load_cookies_from_db()
+        to_delete = []
+        for c in db_cookies:
+            cd = c["domain"].lstrip(".")
+            if cd == domain or domain.endswith("." + cd) or cd.endswith("." + domain):
+                to_delete.append(c)
+        if to_delete:
+            self._delete_cookies_from_db(to_delete)
+            self._show_cookie_toast(domain, len(to_delete))
+
+    def _show_cookie_toast(self, domain, count):
+        """Show a brief notification that cookies were cleared."""
+        self._status.showMessage(
+            f"Auto-deleted {count} cookie{'s' if count != 1 else ''} for {domain}", 4000
+        )
+
     def _on_cookie_added(self, cookie):
         from PyQt6.QtNetwork import QNetworkCookie
         self._all_cookies.append(QNetworkCookie(cookie))
@@ -2617,8 +2733,13 @@ class MainWindow(QMainWindow):
                 f"{total} cookies from {len(set(c['domain'] for c in db_cookies))} domains"
                 if not ft else f"Showing {shown} cookies")
             for domain in sorted(domains.keys()):
-                parent = QTreeWidgetItem(tree, [f"{domain}  ({len(domains[domain])})"])
-                parent.setForeground(0, QColor(style.ACCENT))
+                clean = domain.lstrip(".")
+                wl = storage.is_cookie_whitelisted(clean)
+                label = f"{domain}  ({len(domains[domain])})"
+                if wl:
+                    label += "  \u2605 kept"
+                parent = QTreeWidgetItem(tree, [label])
+                parent.setForeground(0, QColor(style.GREEN if wl else style.ACCENT))
                 parent.setExpanded(True)
                 for c in domains[domain]:
                     flags = ""
@@ -2639,11 +2760,13 @@ class MainWindow(QMainWindow):
         delete_btn.setStyleSheet(style.DIALOG_BTN_DANGER_STYLE)
         delete_all_btn = QPushButton("Delete All")
         delete_all_btn.setStyleSheet(style.DIALOG_BTN_DANGER_STYLE)
+        whitelist_btn = QPushButton("Toggle Keep")
+        whitelist_btn.setStyleSheet(style.DIALOG_BTN_STYLE)
+        whitelist_btn.setToolTip("Toggle whitelist — kept domains survive auto-delete")
         close_btn = QPushButton("Close")
         close_btn.setStyleSheet(style.DIALOG_BTN_STYLE)
 
         def delete_selected():
-            from PyQt6.QtNetwork import QNetworkCookie
             items = tree.selectedItems()
             if not items:
                 return
@@ -2653,18 +2776,15 @@ class MainWindow(QMainWindow):
                 if c:
                     to_delete.append(c)
                 elif item.childCount() > 0:
-                    # Domain group — collect all children
                     for i in range(item.childCount()):
                         cc = _cookie_map.get(id(item.child(i)))
                         if cc:
                             to_delete.append(cc)
-            for c in to_delete:
-                qc = QNetworkCookie(c["name"].encode(), b"")
-                qc.setDomain(c["domain"])
-                qc.setPath(c["path"])
-                cookie_store.deleteCookie(qc)
-                if c in db_cookies:
-                    db_cookies.remove(c)
+            if to_delete:
+                self._delete_cookies_from_db(to_delete)
+                for c in to_delete:
+                    if c in db_cookies:
+                        db_cookies.remove(c)
             populate(search.text())
 
         def delete_all():
@@ -2673,16 +2793,35 @@ class MainWindow(QMainWindow):
                 "Delete all cookies? You will be logged out of all sites.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if reply == QMessageBox.StandardButton.Yes:
-                cookie_store.deleteAllCookies()
+                self._delete_all_cookies_from_db()
                 db_cookies.clear()
                 populate(search.text())
 
+        def toggle_whitelist():
+            items = tree.selectedItems()
+            for item in items:
+                if item.parent() is None:
+                    domain = item.text(0).split("  (")[0].strip().lstrip(".")
+                else:
+                    c = _cookie_map.get(id(item))
+                    if c:
+                        domain = c["domain"].lstrip(".")
+                    else:
+                        continue
+                if storage.is_cookie_whitelisted(domain):
+                    storage.remove_cookie_whitelist(domain)
+                else:
+                    storage.add_cookie_whitelist(domain)
+            populate(search.text())
+
         delete_btn.clicked.connect(delete_selected)
         delete_all_btn.clicked.connect(delete_all)
+        whitelist_btn.clicked.connect(toggle_whitelist)
         close_btn.clicked.connect(dialog.close)
 
         btn_layout.addWidget(delete_btn)
         btn_layout.addWidget(delete_all_btn)
+        btn_layout.addWidget(whitelist_btn)
         btn_layout.addStretch()
         btn_layout.addWidget(close_btn)
         layout.addLayout(btn_layout)

@@ -114,6 +114,7 @@ DEFAULT_SETTINGS = {
     "custom_dns_cert_fingerprint": "",
     "filterlist_last_update": 0,
     "vault_backend": "master_password",
+    "auto_delete_cookies": False,
 }
 
 
@@ -223,6 +224,42 @@ def clear_session():
     path = DATA_DIR / "session.json"
     if path.exists():
         path.unlink()
+
+
+# ---------------------------------------------------------------------------
+# Cookie auto-delete whitelist
+# ---------------------------------------------------------------------------
+
+def load_cookie_whitelist() -> list[str]:
+    return _load_json("cookie_whitelist.json", [])
+
+
+def save_cookie_whitelist(whitelist: list[str]):
+    _save_json("cookie_whitelist.json", whitelist)
+
+
+def add_cookie_whitelist(domain: str):
+    domain = domain.lstrip(".")
+    wl = load_cookie_whitelist()
+    if domain not in wl:
+        wl.append(domain)
+        save_cookie_whitelist(wl)
+
+
+def remove_cookie_whitelist(domain: str):
+    domain = domain.lstrip(".")
+    wl = load_cookie_whitelist()
+    wl = [d for d in wl if d != domain]
+    save_cookie_whitelist(wl)
+
+
+def is_cookie_whitelisted(domain: str) -> bool:
+    wl = load_cookie_whitelist()
+    domain = domain.lstrip(".")
+    for w in wl:
+        if domain == w or domain.endswith("." + w):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------

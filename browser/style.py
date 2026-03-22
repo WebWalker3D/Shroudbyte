@@ -561,6 +561,14 @@ FIND_BAR_BTN_STYLE = f"""
     }}
 """
 
+TOAST_STYLE = f"""
+    QFrame {{
+        background: {BG_CARD};
+        border: 1px solid {BORDER};
+        border-radius: 10px;
+    }}
+"""
+
 SOURCE_EDITOR_STYLE = f"""
     QTextEdit {{
         background: {BG_DARK};
