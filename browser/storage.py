@@ -115,6 +115,7 @@ DEFAULT_SETTINGS = {
     "filterlist_last_update": 0,
     "vault_backend": "master_password",
     "auto_delete_cookies": False,
+    "link_intelligence": True,
 }
 
 
@@ -290,6 +291,14 @@ def set_permission(host, feature, decision):
     save_permissions(perms)
 
 
+def remove_all_permissions(host):
+    """Remove all permissions for a host."""
+    perms = load_permissions()
+    if host in perms:
+        del perms[host]
+        save_permissions(perms)
+
+
 def remove_permission(host, feature=None):
     """Remove permission(s) for a host. If feature is None, remove all for that host."""
     perms = load_permissions()
@@ -301,6 +310,41 @@ def remove_permission(host, feature=None):
         else:
             del perms[host]
         save_permissions(perms)
+
+
+# ---------------------------------------------------------------------------
+# Site-specific tracker exceptions (Privacy Dashboard)
+# ---------------------------------------------------------------------------
+
+def load_site_exceptions():
+    """Load per-site tracker allow/block overrides.
+
+    Returns ``{site_host: {tracker_host: "allow"|"block", ...}, ...}``.
+    """
+    return _load_json("site_exceptions.json", {})
+
+
+def save_site_exceptions(exceptions):
+    _save_json("site_exceptions.json", exceptions)
+
+
+def set_site_exception(site_host, tracker_host, action):
+    """Set a per-site exception ('allow' or 'block') for a tracker domain."""
+    exc = load_site_exceptions()
+    if site_host not in exc:
+        exc[site_host] = {}
+    exc[site_host][tracker_host] = action
+    save_site_exceptions(exc)
+
+
+def remove_site_exception(site_host, tracker_host):
+    """Remove a per-site exception."""
+    exc = load_site_exceptions()
+    if site_host in exc:
+        exc[site_host].pop(tracker_host, None)
+        if not exc[site_host]:
+            del exc[site_host]
+        save_site_exceptions(exc)
 
 
 # ---------------------------------------------------------------------------

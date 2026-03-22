@@ -16,6 +16,8 @@ from PyQt6.QtWidgets import QApplication, QDialog, QMenu, QVBoxLayout
 
 _CRED_ALERT_PREFIX = "__SHROUD_CRED_CAPTURE__:"
 _PW_FOUND_ALERT = "__SHROUD_PW_FIELDS_FOUND__"
+_LINK_HOVER_PREFIX = "__SHROUD_LINK_HOVER__:"
+_PRIVACY_ACTION_PREFIX = "__SHROUD_PRIVACY__:"
 
 # Shared set of hosts known NOT to require HTTP auth.
 # Populated on successful HEAD checks; avoids repeat probes.
@@ -56,6 +58,32 @@ class ShroudPage(QWebEnginePage):
                 QTimer.singleShot(0, lambda: mw._on_dynamic_password_fields_found())
             return
         super().javaScriptAlert(securityOrigin, msg)
+
+    def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
+        """Intercept link-hover messages from injected Link Intelligence JS."""
+        if message.startswith(_LINK_HOVER_PREFIX):
+            try:
+                import json as _json
+                data = _json.loads(message[len(_LINK_HOVER_PREFIX):])
+                href = data.get("href", "")
+                if href:
+                    mw = self._get_main_window()
+                    if mw and hasattr(mw, "_handle_link_hover"):
+                        mw._handle_link_hover(href, self._view_ref)
+            except Exception:
+                pass
+            return
+        if message.startswith(_PRIVACY_ACTION_PREFIX):
+            try:
+                import json as _json
+                data = _json.loads(message[len(_PRIVACY_ACTION_PREFIX):])
+                mw = self._get_main_window()
+                if mw and hasattr(mw, "_handle_privacy_action"):
+                    mw._handle_privacy_action(data)
+            except Exception:
+                pass
+            return
+        super().javaScriptConsoleMessage(level, message, lineNumber, sourceID)
 
     def createWindow(self, window_type):
         view = self._view_ref

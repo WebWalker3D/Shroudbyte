@@ -423,8 +423,16 @@ SETTINGS_FORM_STYLE = f"""
     QDialogButtonBox {{ button-layout: 0; }}
 """
 
-ADBLOCK_LABEL_ON_STYLE = f"color: {GREEN}; font-size: 11px; padding: 0 8px;"
-ADBLOCK_LABEL_OFF_STYLE = f"color: {TEXT_FAINT}; font-size: 11px; padding: 0 8px;"
+ADBLOCK_LABEL_ON_STYLE = (
+    f"QPushButton {{ color: {GREEN}; font-size: 11px; padding: 0 8px; "
+    f"border: none; background: transparent; }}"
+    f"QPushButton:hover {{ color: {ACCENT_TEXT}; }}"
+)
+ADBLOCK_LABEL_OFF_STYLE = (
+    f"QPushButton {{ color: {TEXT_FAINT}; font-size: 11px; padding: 0 8px; "
+    f"border: none; background: transparent; }}"
+    f"QPushButton:hover {{ color: {TEXT_DIM}; }}"
+)
 
 COMPLETER_POPUP_STYLE = f"""
     QListView {{
@@ -577,5 +585,70 @@ SOURCE_EDITOR_STYLE = f"""
         font-size: 13px;
         border: none;
         padding: 14px;
+    }}
+"""
+
+PRIVACY_PANEL_STYLE = f"""
+    QDialog {{
+        background: {BG_MID};
+        color: {TEXT};
+    }}
+    QLabel {{
+        color: {TEXT};
+    }}
+    QScrollArea {{
+        background: {BG_MID};
+        border: none;
+    }}
+"""
+
+PRIVACY_SECTION_HEADER = f"""
+    color: {ACCENT_TEXT};
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 8px 0 4px 0;
+"""
+
+PRIVACY_SECTION_BOX = f"""
+    QFrame {{
+        background: {BG_CARD};
+        border: 1px solid {BORDER};
+        border-radius: 10px;
+        padding: 2px;
+    }}
+"""
+
+PRIVACY_ROW_BTN = f"""
+    QPushButton {{
+        padding: 3px 10px;
+        font-size: 11px;
+        font-weight: 500;
+        border: 1px solid {BORDER};
+        border-radius: 5px;
+        background: {BG_MID};
+        color: {TEXT_DIM};
+    }}
+    QPushButton:hover {{
+        background: {BG_HOVER};
+        border-color: {ACCENT};
+        color: {TEXT};
+    }}
+"""
+
+PRIVACY_ROW_BTN_DANGER = f"""
+    QPushButton {{
+        padding: 3px 10px;
+        font-size: 11px;
+        font-weight: 500;
+        border: 1px solid {RED};
+        border-radius: 5px;
+        background: transparent;
+        color: {RED};
+    }}
+    QPushButton:hover {{
+        background: {RED};
+        color: {BG_DARK};
     }}
 """

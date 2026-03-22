@@ -156,6 +156,16 @@ TRACKING_PARAMS = {
 }
 
 
+class PageTracker:
+    """Accumulated request data for a single first-party domain."""
+    __slots__ = ('blocked', 'third_party', 'stripped_params')
+
+    def __init__(self):
+        self.blocked: dict[str, int] = {}       # host -> request count
+        self.third_party: dict[str, int] = {}   # host -> request count (allowed)
+        self.stripped_params: set[str] = set()
+
+
 class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -165,6 +175,8 @@ class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
         self.do_not_track = True
         self.strip_tracking = True
         self._http_auth = {}  # host -> b"Basic base64(user:pass)"
+        self._page_data: dict[str, PageTracker] = {}
+        self._site_exceptions: dict[str, dict[str, str]] = {}
         self.reload_hosts()
 
     def set_http_auth(self, host, user, password):
@@ -204,17 +216,72 @@ class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
     def reset_count(self):
         self._blocked_count = 0
 
+    # ── per-page tracking for the Privacy Dashboard ──────────────
+
+    def get_page_data(self, host):
+        """Return PageTracker for a first-party host, or None."""
+        return self._page_data.get(host.lower())
+
+    def clear_page_data(self, host=None):
+        """Clear tracked data for one or all hosts."""
+        if host:
+            self._page_data.pop(host.lower(), None)
+        else:
+            self._page_data.clear()
+
+    def set_site_exceptions(self, exceptions):
+        """Load per-site allow/block overrides from storage."""
+        self._site_exceptions = exceptions or {}
+
+    def _ensure_page_data(self, fp_host):
+        tracker = self._page_data.get(fp_host)
+        if tracker is None:
+            tracker = PageTracker()
+            self._page_data[fp_host] = tracker
+        return tracker
+
+    @staticmethod
+    def _is_third_party(fp_host, req_host):
+        if not fp_host or not req_host:
+            return False
+        fp = fp_host.removeprefix("www.")
+        rq = req_host.removeprefix("www.")
+        if fp == rq:
+            return False
+        return not (rq.endswith("." + fp) or fp.endswith("." + rq))
+
+    def _match_blocked(self, host):
+        """Return the blocked domain rule that matches *host*, or None."""
+        parts = host.split(".")
+        for i in range(len(parts) - 1):
+            domain = ".".join(parts[i:])
+            if domain in self._blocked_hosts:
+                return domain
+        return None
+
     def interceptRequest(self, info):
         # Inject Do Not Track header
         if self.do_not_track:
             info.setHttpHeader(b"DNT", b"1")
 
         url = info.requestUrl()
+        req_host = url.host().lower()
 
         # Inject HTTP Basic auth header for protected hosts
-        auth = self._http_auth.get(url.host().lower())
+        auth = self._http_auth.get(req_host)
         if auth:
             info.setHttpHeader(b"Authorization", auth)
+
+        # Determine first-party context for per-page tracking
+        # Skip tracking for internal shroud:// pages
+        if url.scheme() == "shroud":
+            return
+        first_party = info.firstPartyUrl()
+        fp_scheme = first_party.scheme() if first_party.isValid() else ""
+        fp_host = (first_party.host() or "").lower() if first_party.isValid() else ""
+        if fp_scheme == "shroud":
+            fp_host = ""  # don't track internal pages
+        is_3p = self._is_third_party(fp_host, req_host)
 
         # Strip tracking parameters from URLs
         if self.strip_tracking and url.hasQuery():
@@ -222,6 +289,12 @@ class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
             items = query.queryItems()
             cleaned = [(k, v) for k, v in items if k not in TRACKING_PARAMS]
             if len(cleaned) < len(items):
+                # Record stripped params
+                if fp_host:
+                    tracker = self._ensure_page_data(fp_host)
+                    for k, v in items:
+                        if k in TRACKING_PARAMS:
+                            tracker.stripped_params.add(k)
                 clean_url = QUrl(url)
                 if cleaned:
                     new_query = QUrlQuery()
@@ -234,14 +307,37 @@ class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
                 return
 
         if not self._enabled:
+            # Still track third-party connections when blocker is off
+            if is_3p and fp_host:
+                tracker = self._ensure_page_data(fp_host)
+                tracker.third_party[req_host] = tracker.third_party.get(req_host, 0) + 1
             return
 
-        host = url.host().lower()
-        # Check if the host or any parent domain is blocked
-        parts = host.split(".")
-        for i in range(len(parts) - 1):
-            domain = ".".join(parts[i:])
-            if domain in self._blocked_hosts:
+        # Check per-site exceptions before normal blocking
+        if is_3p and fp_host:
+            site_exc = self._site_exceptions.get(fp_host, {})
+            exc = site_exc.get(req_host)
+            if exc == "allow":
+                tracker = self._ensure_page_data(fp_host)
+                tracker.third_party[req_host] = tracker.third_party.get(req_host, 0) + 1
+                return  # user-allowed override
+            if exc == "block":
+                tracker = self._ensure_page_data(fp_host)
+                tracker.blocked[req_host] = tracker.blocked.get(req_host, 0) + 1
                 info.block(True)
                 self._blocked_count += 1
-                return
+                return  # user-blocked override
+
+        # Check if the host or any parent domain is blocked
+        if self._match_blocked(req_host):
+            if is_3p and fp_host:
+                tracker = self._ensure_page_data(fp_host)
+                tracker.blocked[req_host] = tracker.blocked.get(req_host, 0) + 1
+            info.block(True)
+            self._blocked_count += 1
+            return
+
+        # Not blocked — record as third-party if applicable
+        if is_3p and fp_host:
+            tracker = self._ensure_page_data(fp_host)
+            tracker.third_party[req_host] = tracker.third_party.get(req_host, 0) + 1

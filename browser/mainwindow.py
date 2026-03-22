@@ -66,6 +66,8 @@ from .passworddialogs import (
 )
 from .scheme import ShroudSchemeHandler
 from .webview import ShroudWebView
+from .link_intel import LinkResolver
+from .privacy_panel import PrivacyPanel
 from . import style
 
 
@@ -175,6 +177,12 @@ class MainWindow(QMainWindow):
         self._adblocker.enabled = self._settings.get("enable_adblock", True)
         self._profile.setUrlRequestInterceptor(self._adblocker)
 
+        # Load per-site tracker exceptions for the Privacy Dashboard
+        self._adblocker.set_site_exceptions(storage.load_site_exceptions())
+
+        # Link Intelligence resolver
+        self._link_resolver = LinkResolver(self._adblocker._blocked_hosts)
+
         # Early content-blocking script (runs at document creation before page scripts)
         if self._settings.get("enable_adblock", True):
             self._install_content_blocking_script()
@@ -260,6 +268,7 @@ class MainWindow(QMainWindow):
 
         def _apply():
             self._adblocker.reload_hosts()
+            self._link_resolver.update_blocked_hosts(self._adblocker._blocked_hosts)
             self._cosmetic_css = filterlists.get_cosmetic_css()
             self._update_adblock_label()
 
@@ -463,7 +472,10 @@ class MainWindow(QMainWindow):
         self._status = QStatusBar()
         self.setStatusBar(self._status)
 
-        self._adblock_label = QLabel()
+        self._adblock_label = QPushButton()
+        self._adblock_label.setFlat(True)
+        self._adblock_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._adblock_label.clicked.connect(self._show_privacy_panel)
         self._status.addPermanentWidget(self._adblock_label)
         self._update_adblock_label()
 
@@ -1095,6 +1107,9 @@ class MainWindow(QMainWindow):
                 # Inject fingerprint resistance
                 if self._settings.get("fingerprint_resistance", False):
                     view.page().runJavaScript(get_fingerprint_resistance_js())
+                # Inject Link Intelligence hover tooltips
+                if self._settings.get("link_intelligence", True):
+                    view.page().runJavaScript(self._get_link_intel_js())
             if self._vault.is_unlocked:
                 self._check_page_for_passwords()
                 self._check_session_for_credentials()
@@ -1243,6 +1258,207 @@ class MainWindow(QMainWindow):
         else:
             self._adblock_label.setText("  shield off")
             self._adblock_label.setStyleSheet(style.ADBLOCK_LABEL_OFF_STYLE)
+
+    def _show_privacy_panel(self):
+        """Open the Privacy Dashboard for the current tab."""
+        panel = PrivacyPanel(self, parent=self)
+        panel.exec()
+
+    def _handle_privacy_action(self, data):
+        """Process an action from the shroud://privacy page."""
+        action = data.get("action", "")
+        arg1 = data.get("arg1", "")
+        arg2 = data.get("arg2", "")
+
+        if action == "allow" and arg1 and arg2:
+            storage.set_site_exception(arg1, arg2, "allow")
+            self._adblocker.set_site_exceptions(storage.load_site_exceptions())
+        elif action == "block" and arg1 and arg2:
+            storage.set_site_exception(arg1, arg2, "block")
+            self._adblocker.set_site_exceptions(storage.load_site_exceptions())
+        elif action == "undo_exc" and arg1 and arg2:
+            storage.remove_site_exception(arg1, arg2)
+            self._adblocker.set_site_exceptions(storage.load_site_exceptions())
+        elif action == "del_cookies" and arg1:
+            self._delete_cookies_for_domain(arg1)
+        elif action == "revoke" and arg1 and arg2:
+            storage.remove_permission(arg1, arg2)
+
+    # ------------------------------------------------------------------
+    # Link Intelligence
+    # ------------------------------------------------------------------
+
+    def _handle_link_hover(self, href, view):
+        """Called from ShroudPage when the user hovers a link."""
+        if not self._settings.get("link_intelligence", True):
+            return
+        if not view:
+            return
+
+        def _callback(result):
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: self._on_link_resolved(result, view))
+
+        self._link_resolver.resolve(href, _callback)
+
+    def _on_link_resolved(self, result, view):
+        """Deliver resolved link data back to the page JS."""
+        if not view or not view.page():
+            return
+        # Verify the view is still a live tab
+        found = False
+        for i in range(self._tabs.count()):
+            if self._tabs.widget(i) is view:
+                found = True
+                break
+        if not found:
+            return
+        view.page().runJavaScript(
+            f"window.__shroudShowLinkIntel&&window.__shroudShowLinkIntel({json.dumps(result)})"
+        )
+
+    def _get_link_intel_js(self):
+        """Return JS that enables Link Intelligence hover tooltips."""
+        return """(function() {
+    if (window.__shroudLinkIntel) return;
+    window.__shroudLinkIntel = true;
+
+    var tip = document.createElement('div');
+    tip.id = 'shroud-link-intel';
+    tip.style.cssText =
+        'position:fixed;z-index:2147483647;max-width:420px;padding:0;' +
+        'background:#14131a;border:1px solid #282633;border-radius:10px;' +
+        'box-shadow:0 8px 32px rgba(0,0,0,0.6);font-family:-apple-system,Cantarell,sans-serif;' +
+        'font-size:12px;color:#ede8e3;pointer-events:none;opacity:0;display:none;' +
+        'transition:opacity 0.15s ease;overflow:hidden;border-left:3px solid #7db88f;';
+    document.documentElement.appendChild(tip);
+
+    var styleEl = document.createElement('style');
+    styleEl.textContent = '@keyframes shroudPulse{0%,100%{opacity:.3}50%{opacity:1}}';
+    document.documentElement.appendChild(styleEl);
+
+    var timer = null, currentHref = null, lastRect = null;
+
+    function esc(s) { var d = document.createElement('span'); d.textContent = s; return d.innerHTML; }
+    function domain(u) { try { return new URL(u).hostname; } catch(e) { return u; } }
+
+    function position() {
+        if (!lastRect) return;
+        tip.style.display = 'block';
+        var tw = tip.offsetWidth, th = tip.offsetHeight;
+        var x = lastRect.left, y = lastRect.bottom + 8;
+        if (x + tw > window.innerWidth - 12) x = window.innerWidth - tw - 12;
+        if (x < 12) x = 12;
+        if (y + th > window.innerHeight - 12) y = lastRect.top - th - 8;
+        tip.style.left = x + 'px';
+        tip.style.top = y + 'px';
+    }
+
+    function showResult(data) {
+        if (data.href !== currentHref) return;
+
+        var r = data.redirects || 0;
+        var t = data.trackers ? data.trackers.length : 0;
+        var tp = data.tracking_params ? data.tracking_params.length : 0;
+        var short = data.shortener;
+
+        var sev = 'clean';
+        if (t > 0) sev = 'danger';
+        else if (r > 0 || tp > 0 || short) sev = 'warn';
+
+        var borderColor = {clean:'#7db88f', warn:'#d4a857', danger:'#d96b6b'}[sev];
+        tip.style.borderLeftColor = borderColor;
+
+        var badge = {
+            clean: {bg:'#122118',fg:'#7db88f',text:'\\u2713 Direct'},
+            warn:  {bg:'#2a2210',fg:'#d4a857',text:'\\u21B3 ' + r + ' redirect' + (r!==1?'s':'')},
+            danger:{bg:'#2a1215',fg:'#d96b6b',text:'\\u26A0 ' + t + ' tracker' + (t!==1?'s':'')}
+        }[sev];
+
+        var h = '<div style="padding:10px 14px;">';
+
+        h += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">';
+        h += '<span style="display:inline-block;padding:2px 8px;border-radius:4px;' +
+             'font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;' +
+             'background:'+badge.bg+';color:'+badge.fg+';">'+badge.text+'</span>';
+        if (short) h += '<span style="font-size:10px;color:#8a8494;">shortener</span>';
+        if (tp > 0) h += '<span style="font-size:10px;color:#8a8494;">' +
+            tp + ' tracking param' + (tp!==1?'s':'') + '</span>';
+        h += '</div>';
+
+        if (r > 0 || data.final !== data.href) {
+            var finalUrl = data.final;
+            if (finalUrl.length > 72) finalUrl = finalUrl.substring(0,69) + '\\u2026';
+            h += '<div style="margin-top:6px;color:#cd8d6a;font-size:11px;word-break:break-all;' +
+                 'font-family:monospace;">\\u2192 ' + esc(finalUrl) + '</div>';
+        }
+
+        if (r > 0 && data.chain && data.chain.length > 0) {
+            h += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #282633;' +
+                 'color:#5a5568;font-size:10px;">';
+            var show = data.chain.slice(0, 4);
+            for (var i = 0; i < show.length; i++) {
+                var d = domain(show[i]);
+                var isT = data.trackers && data.trackers.indexOf(d) !== -1;
+                h += '<div style="padding:1px 0;' + (isT?'color:#d96b6b;':'') + '">' +
+                     (i>0?'\\u2192 ':'') + esc(d) + (isT?' \\u2022 tracker':'') + '</div>';
+            }
+            if (data.chain.length > 4) h += '<div>+ ' + (data.chain.length-4) + ' more</div>';
+            h += '<div style="padding:1px 0;">\\u2192 ' + esc(domain(data.final)) + '</div>';
+            h += '</div>';
+        }
+
+        if (t > 0 && r === 0) {
+            h += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #282633;' +
+                 'color:#d96b6b;font-size:10px;">';
+            for (var j = 0; j < data.trackers.length && j < 5; j++)
+                h += '<div>\\u2022 ' + esc(data.trackers[j]) + '</div>';
+            h += '</div>';
+        }
+
+        h += '</div>';
+        tip.innerHTML = h;
+        position();
+        tip.style.opacity = '1';
+    }
+
+    window.__shroudShowLinkIntel = function(data) { showResult(data); };
+
+    document.addEventListener('mouseover', function(e) {
+        var a = e.target.closest('a[href]');
+        if (!a) return;
+        var href = a.href;
+        if (!href) return;
+        var lc = href.toLowerCase();
+        if (lc.startsWith('javascript:') || lc.startsWith('mailto:') ||
+            lc.startsWith('tel:') || lc.startsWith('data:') || lc.startsWith('blob:')) return;
+        if (href.indexOf('#') > 0 &&
+            href.split('#')[0] === window.location.href.split('#')[0]) return;
+
+        currentHref = href;
+        lastRect = a.getBoundingClientRect();
+        clearTimeout(timer);
+
+        timer = setTimeout(function() {
+            tip.innerHTML = '<div style="padding:8px 14px;color:#5a5568;font-size:11px;">' +
+                '<span style="display:inline-block;animation:shroudPulse 1s ease infinite;">\\u2022</span> ' +
+                'Resolving link\\u2026</div>';
+            tip.style.borderLeftColor = '#282633';
+            position();
+            tip.style.opacity = '1';
+            console.log('__SHROUD_LINK_HOVER__:' + JSON.stringify({href:href}));
+        }, 400);
+    }, true);
+
+    document.addEventListener('mouseout', function(e) {
+        var a = e.target.closest('a[href]');
+        if (!a) return;
+        clearTimeout(timer);
+        currentHref = null;
+        tip.style.opacity = '0';
+        setTimeout(function() { if (!currentHref) tip.style.display = 'none'; }, 200);
+    }, true);
+})();"""
 
     # ------------------------------------------------------------------
     # Bookmarks
@@ -1793,6 +2009,13 @@ class MainWindow(QMainWindow):
         fp_check = QCheckBox("Enabled")
         fp_check.setChecked(self._settings.get("fingerprint_resistance", False))
 
+        link_intel_check = QCheckBox("Enabled")
+        link_intel_check.setChecked(self._settings.get("link_intelligence", True))
+        link_intel_check.setToolTip(
+            "Hover over links to see where they really go.\n"
+            "Resolves redirect chains, detects trackers and URL shorteners."
+        )
+
         auto_del_check = QCheckBox("Enabled")
         auto_del_check.setChecked(self._settings.get("auto_delete_cookies", False))
         auto_del_check.setToolTip(
@@ -1825,6 +2048,7 @@ class MainWindow(QMainWindow):
         layout.addRow("Do Not Track", dnt_check)
         layout.addRow("Strip Tracking Params", strip_check)
         layout.addRow("Fingerprint Resistance", fp_check)
+        layout.addRow("Link Intelligence", link_intel_check)
         layout.addRow("Auto-Delete Cookies", auto_del_check)
         layout.addRow("DNS-over-HTTPS", doh_combo)
 
@@ -2016,6 +2240,7 @@ class MainWindow(QMainWindow):
             self._settings["restore_session"] = session_check.isChecked()
             self._settings["strip_tracking"] = strip_check.isChecked()
             self._settings["fingerprint_resistance"] = fp_check.isChecked()
+            self._settings["link_intelligence"] = link_intel_check.isChecked()
             self._settings["auto_delete_cookies"] = auto_del_check.isChecked()
             self._settings["dns_over_https"] = doh_combo.currentText()
             self._settings["dns_over_https_provider"] = doh_provider_edit.text().strip()
