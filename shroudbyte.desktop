@@ -1,9 +1,9 @@
 [Desktop Entry]
 Name=Shroudbyte
 Comment=A custom Linux web browser
-Exec=/home/blaine/Shroudbyte/shroudbyte.sh
+Exec=/home/blaine/Blade-Browser/shroudbyte.sh
 Type=Application
 Categories=Network;WebBrowser;
-Icon=/home/blaine/Shroudbyte/shroudbyte-icon.svg
+Icon=/home/blaine/Blade-Browser/shroudbyte-icon.svg
 Terminal=false
 StartupNotify=true

@@ -687,7 +687,11 @@ class MainWindow(QMainWindow):
         self._current_view().load(url)
 
     def _go_home(self):
-        self.add_new_tab()
+        view = self._current_view()
+        if view:
+            view.load(QUrl("shroud://newtab"))
+        else:
+            self.add_new_tab()
 
     def _update_url_bar(self, url):
         if url.scheme() == "shroud" and url.host() == "newtab":
@@ -1426,7 +1430,6 @@ class MainWindow(QMainWindow):
         layout.setSpacing(14)
         layout.setContentsMargins(24, 24, 24, 24)
 
-        homepage_edit = QLineEdit(self._settings.get("homepage", ""))
         search_edit = QLineEdit(self._settings.get("search_engine", ""))
         search_edit.setToolTip("Use {} as placeholder for the search query")
 
@@ -1475,7 +1478,6 @@ class MainWindow(QMainWindow):
             }}
         """)
 
-        layout.addRow("Homepage", homepage_edit)
         layout.addRow("Search Engine", search_edit)
         layout.addRow("JavaScript", js_check)
         layout.addRow("Ad Blocker", adblock_check)
@@ -1573,7 +1575,6 @@ class MainWindow(QMainWindow):
             dialog.resize(dialog.sizeHint().width(), min(dialog.sizeHint().height(), max_h))
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self._settings["homepage"] = homepage_edit.text()
             self._settings["search_engine"] = search_edit.text()
             self._settings["enable_javascript"] = js_check.isChecked()
             self._settings["enable_adblock"] = adblock_check.isChecked()

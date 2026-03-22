@@ -94,7 +94,6 @@ def clear_history():
 # ---------------------------------------------------------------------------
 
 DEFAULT_SETTINGS = {
-    "homepage": "https://duckduckgo.com",
     "search_engine": "https://duckduckgo.com/?q={}",
     "enable_javascript": True,
     "enable_adblock": True,
