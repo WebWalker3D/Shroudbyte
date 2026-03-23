@@ -70,6 +70,7 @@ from .scheme import ShroudSchemeHandler
 from .webview import ShroudWebView
 from .link_intel import LinkResolver
 from .pagewatcher import PageWatcher
+from .pwa import detect_manifest_js, install_pwa, uninstall_pwa
 from .screentime import ScreenTimeTracker
 from .privacy_panel import PrivacyPanel
 from . import style
@@ -1525,6 +1526,8 @@ class MainWindow(QMainWindow):
                     "(document.body&&document.body.innerText||'').split(/\\s+/).length",
                     self._update_reading_time,
                 )
+                # Detect PWA manifest
+                view.page().runJavaScript(detect_manifest_js())
                 # Warn about password fields on HTTP pages
                 if view.url().scheme() == "http":
                     view.page().runJavaScript(
@@ -2174,6 +2177,51 @@ class MainWindow(QMainWindow):
     def _open_bookmark(self, url):
         self._current_view().load(QUrl(url))
 
+    # ------------------------------------------------------------------
+    # PWA support
+    # ------------------------------------------------------------------
+
+    def _handle_pwa(self, data):
+        """Handle PWA manifest detection from injected JS."""
+        action = data.get("action", "")
+        if action == "manifest":
+            manifest = data.get("manifest", {})
+            page_url = data.get("page_url", "")
+            manifest_url = data.get("manifest_url", "")
+            if manifest and page_url:
+                # Store on current view for install action
+                view = self._current_view()
+                if view:
+                    view._pwa_manifest = manifest
+                    view._pwa_page_url = page_url
+                    view._pwa_manifest_url = manifest_url
+
+    def _install_pwa(self, view):
+        """Install the current page as a PWA."""
+        manifest = getattr(view, '_pwa_manifest', None)
+        if not manifest:
+            self._status.showMessage("No web app manifest found on this page", 3000)
+            return
+        page_url = getattr(view, '_pwa_page_url', view.url().toString())
+        manifest_url = getattr(view, '_pwa_manifest_url', '')
+
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            app_data = install_pwa(manifest, page_url, manifest_url)
+            name = app_data.get("name", "App")
+            self._status.showMessage(
+                f"Installed: {name} — find it in your app launcher", 5000
+            )
+        except Exception as exc:
+            self._status.showMessage(f"Install failed: {exc}", 5000)
+        finally:
+            QApplication.restoreOverrideCursor()
+
+    def _uninstall_pwa_action(self, start_url):
+        """Uninstall a PWA by start URL."""
+        uninstall_pwa(start_url)
+        self._status.showMessage("App uninstalled", 3000)
+
     def _handle_page_action(self, data):
         """Handle actions from shroud://bookmarks and shroud://history pages."""
         action = data.get("action", "")
@@ -2194,6 +2242,17 @@ class MainWindow(QMainWindow):
         elif action == "del_saved" and arg:
             storage.remove_saved_page(arg)
             self._status.showMessage("Saved page deleted", 2000)
+        elif action == "uninstall_app" and arg:
+            self._uninstall_pwa_action(arg)
+        elif action == "launch_app" and arg:
+            import subprocess
+            from pathlib import Path
+            project_dir = str(Path(__file__).parent.parent)
+            subprocess.Popen(
+                [sys.executable, "-m", "browser", f"--app={arg}"],
+                cwd=project_dir,
+                start_new_session=True,
+            )
 
     def _show_bookmarks(self):
         view = self._current_view()

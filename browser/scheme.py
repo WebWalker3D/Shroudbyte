@@ -1,6 +1,7 @@
 """Custom shroud:// URL scheme handler for internal browser pages."""
 
 import html as html_mod
+import os
 import platform
 import re
 import sys
@@ -41,6 +42,7 @@ _PAGES = {
     "watches": "Page Watches",
     "screentime": "Screen Time",
     "saved": "Saved Pages",
+    "apps": "Installed Apps",
     "about": "About Shroudbyte",
     "shortcuts": "Keyboard Shortcuts",
 }
@@ -75,6 +77,8 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
             html = self._page_screentime()
         elif host == "saved":
             html = self._page_saved()
+        elif host == "apps":
+            html = self._page_apps()
         elif host == "savedview":
             html = self._page_saved_view(url)
         elif host == "about":
@@ -104,6 +108,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         ("watches", "\u25CE", "Page Watches"),
         ("screentime", "\u231A", "Screen Time"),
         ("saved", "\u2B73", "Saved Pages"),
+        ("apps", "\u2B1A", "Apps"),
         ("shortcuts", "\u2328", "Shortcuts"),
         ("about", "\u2139", "About"),
     ]
@@ -1299,6 +1304,73 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
             modified = toolbar + html_content
 
         return modified
+
+    def _page_apps(self):
+        """Generate the shroud://apps installed PWA management page."""
+        import time as _time
+        apps = storage.load_installed_apps()
+
+        rows = ""
+        for app in apps:
+            esc_name = html_mod.escape(app.get("name", "App"))
+            esc_url = html_mod.escape(app.get("start_url", ""))
+            icon = app.get("icon_path", "")
+            ago = ""
+            ts = app.get("installed", 0)
+            if ts:
+                d = _time.time() - ts
+                if d < 3600:
+                    ago = f"{int(d/60)}m ago"
+                elif d < 86400:
+                    ago = f"{int(d/3600)}h ago"
+                else:
+                    ago = f"{int(d/86400)}d ago"
+
+            icon_html = ""
+            if icon and os.path.exists(icon):
+                icon_html = (
+                    f'<img src="file://{html_mod.escape(icon)}" '
+                    f'style="width:32px;height:32px;border-radius:6px;object-fit:cover;" '
+                    f'onerror="this.style.display=\'none\'">'
+                )
+            else:
+                icon_html = (
+                    f'<div style="width:32px;height:32px;border-radius:6px;'
+                    f'background:{BG_ACTIVE};display:flex;align-items:center;'
+                    f'justify-content:center;font-size:16px;color:{TEXT_FAINT};">'
+                    f'\u2B1A</div>'
+                )
+
+            rows += (
+                f'<div class="entry" style="gap:14px;">'
+                f'{icon_html}'
+                f'<div style="flex:1;min-width:0;">'
+                f'<div class="entry-title">{esc_name}</div>'
+                f'<div class="entry-url">{esc_url}</div></div>'
+                f'<span style="font-size:10px;color:{TEXT_FAINT};flex-shrink:0;">'
+                f'{ago}</span>'
+                f'<button class="act-btn visit" '
+                f'onclick="pageAct(\'launch_app\',\'{esc_url}\')">Launch</button>'
+                f'<button class="act-btn danger" '
+                f'onclick="pageAct(\'uninstall_app\',\'{esc_url}\')">Uninstall</button>'
+                f'</div>'
+            )
+
+        if not apps:
+            rows = (
+                '<div class="empty">No apps installed yet. '
+                'Visit a PWA-enabled site and right-click to install it.</div>'
+            )
+
+        content = f"""
+    <div class="section-desc">{len(apps)} app{'s' if len(apps) != 1 else ''} installed</div>
+    <div class="card">{rows}</div>"""
+
+        return self._wrap("Installed Apps", "apps", content, extra_js="""
+    function pageAct(action, arg) {
+      console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify({action:action,arg:arg}));
+      setTimeout(function(){ location.reload(); }, 300);
+    }""")
 
     def _page_watches(self):
         """Generate the shroud://watches page watch management page."""

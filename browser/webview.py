@@ -23,6 +23,7 @@ _SETTINGS_ACTION_PREFIX = "__SHROUD_SETTINGS__:"
 _PAGE_ACT_PREFIX = "__SHROUD_PAGE_ACT__:"
 _FORM_DRAFT_PREFIX = "__SHROUD_FORM_DRAFT__:"
 _CLIP_PREFIX = "__SHROUD_CLIP__:"
+_PWA_PREFIX = "__SHROUD_PWA__:"
 
 # Shared set of hosts known NOT to require HTTP auth.
 # Populated on successful HEAD checks; avoids repeat probes.
@@ -135,6 +136,16 @@ class ShroudPage(QWebEnginePage):
                 if mw and hasattr(mw, "_clipboard_history"):
                     url = self.url().toString() if self._view_ref else ""
                     mw._clipboard_history.record(text, url)
+            return
+        if message.startswith(_PWA_PREFIX):
+            try:
+                import json as _json
+                data = _json.loads(message[len(_PWA_PREFIX):])
+                mw = self._get_main_window()
+                if mw and hasattr(mw, "_handle_pwa"):
+                    mw._handle_pwa(data)
+            except Exception:
+                pass
             return
         super().javaScriptConsoleMessage(level, message, lineNumber, sourceID)
 
@@ -458,6 +469,15 @@ class ShroudWebView(QWebEngineView):
             else:
                 watch_act = menu.addAction("Watch This Page")
                 watch_act.triggered.connect(lambda: self._start_watching())
+            # PWA install
+            if getattr(self, '_pwa_manifest', None) is not None:
+                pwa_name = (self._pwa_manifest.get("short_name")
+                            or self._pwa_manifest.get("name") or "App")
+                install_act = menu.addAction(f"Install \"{pwa_name}\" as App")
+                install_act.triggered.connect(
+                    lambda: self._tab_widget._install_pwa(self)
+                    if self._tab_widget else None
+                )
 
         menu.exec(event.globalPos())
 

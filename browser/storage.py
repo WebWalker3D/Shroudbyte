@@ -503,6 +503,39 @@ def clear_screen_time():
 
 
 # ---------------------------------------------------------------------------
+# Installed PWAs (Progressive Web Apps)
+# ---------------------------------------------------------------------------
+
+def load_installed_apps() -> list[dict]:
+    return _load_json("installed_apps.json", [])
+
+
+def save_installed_apps(apps: list[dict]):
+    _save_json("installed_apps.json", apps)
+
+
+def add_installed_app(app: dict):
+    apps = load_installed_apps()
+    # Replace existing with same start_url
+    apps = [a for a in apps if a.get("start_url") != app.get("start_url")]
+    apps.insert(0, app)
+    save_installed_apps(apps)
+
+
+def remove_installed_app(start_url: str):
+    apps = load_installed_apps()
+    apps = [a for a in apps if a.get("start_url") != start_url]
+    save_installed_apps(apps)
+
+
+def get_installed_app(start_url: str) -> dict | None:
+    for a in load_installed_apps():
+        if a.get("start_url") == start_url:
+            return a
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Saved pages (offline snapshots)
 # ---------------------------------------------------------------------------
 

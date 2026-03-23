@@ -210,18 +210,27 @@ sys.exit(app.exec())
     )
 
 
+def _parse_app_url():
+    """Check for --app=URL argument."""
+    for arg in sys.argv[1:]:
+        if arg.startswith("--app="):
+            return arg[6:]
+    return None
+
+
 def main():
-    if not _acquire_single_instance_lock():
+    app_url = _parse_app_url()
+
+    # Allow multiple instances for PWA app windows
+    if not app_url and not _acquire_single_instance_lock():
         print("Shroudbyte is already running.", file=sys.stderr)
         sys.exit(0)
 
     splash_proc = None
     try:
-        # Launch splash in a separate process — it appears instantly while we
-        # do the heavy Qt WebEngine initialisation in this process.
-        splash_proc = _launch_splash()
-
-        app = QApplication(sys.argv)
+        # Filter out --app= from argv so Chromium doesn't choke on it
+        qt_argv = [a for a in sys.argv if not a.startswith("--app=")]
+        app = QApplication(qt_argv)
         app.setApplicationName(__app_name__)
         app.setOrganizationName("Shroudbyte")
         app.setDesktopFileName("shroudbyte")
@@ -242,13 +251,21 @@ def main():
         palette.setColor(QPalette.ColorRole.Link, QColor(41, 121, 255))
         app.setPalette(palette)
 
-        window = MainWindow(dns_proxy=_proxy_instance)
-        window.show()
+        if app_url:
+            # PWA app mode — minimal window, no tabs, no URL bar
+            from .appwindow import AppWindow
+            window = AppWindow(app_url, dns_proxy=_proxy_instance)
+            window.show()
+        else:
+            # Normal browser — with splash
+            splash_proc = _launch_splash()
+            window = MainWindow(dns_proxy=_proxy_instance)
+            window.show()
 
-        # Kill the splash now that the main window is visible.
-        splash_proc.terminate()
-        splash_proc.wait()
-        splash_proc = None
+            # Kill the splash now that the main window is visible.
+            splash_proc.terminate()
+            splash_proc.wait()
+            splash_proc = None
 
         ret = app.exec()
 
