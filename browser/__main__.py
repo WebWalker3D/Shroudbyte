@@ -221,12 +221,20 @@ def _parse_app_url():
 def main():
     app_url = _parse_app_url()
 
+    # Launch splash immediately — before any heavy work — so the user
+    # sees feedback while settings, DNS proxy, and Qt initialise.
+    splash_proc = None
+    if not app_url:
+        splash_proc = _launch_splash()
+
     # Allow multiple instances for PWA app windows
     if not app_url and not _acquire_single_instance_lock():
+        if splash_proc is not None:
+            splash_proc.terminate()
+            splash_proc.wait()
         print("Shroudbyte is already running.", file=sys.stderr)
         sys.exit(0)
 
-    splash_proc = None
     try:
         # Filter out --app= from argv so Chromium doesn't choke on it
         qt_argv = [a for a in sys.argv if not a.startswith("--app=")]
@@ -257,15 +265,15 @@ def main():
             window = AppWindow(app_url, dns_proxy=_proxy_instance)
             window.show()
         else:
-            # Normal browser — with splash
-            splash_proc = _launch_splash()
+            # Normal browser
             window = MainWindow(dns_proxy=_proxy_instance)
             window.show()
 
             # Kill the splash now that the main window is visible.
-            splash_proc.terminate()
-            splash_proc.wait()
-            splash_proc = None
+            if splash_proc is not None:
+                splash_proc.terminate()
+                splash_proc.wait()
+                splash_proc = None
 
         ret = app.exec()
 
