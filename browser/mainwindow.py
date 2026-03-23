@@ -176,13 +176,13 @@ class MainWindow(QMainWindow):
     from PyQt6.QtCore import pyqtSignal
     _link_resolved_sig = pyqtSignal(object, object)
 
-    def __init__(self, dns_proxy=None):
+    def __init__(self, dns_proxy=None, private_mode=False):
         super().__init__()
         self._link_resolved_sig.connect(self._on_link_resolved)
         self._dns_proxy = dns_proxy
 
         self._settings = storage.load_settings()
-        self._private_mode = self._settings.get("private_mode", False)
+        self._private_mode = private_mode or self._settings.get("private_mode", False)
 
         # Profile
         if self._private_mode:
@@ -2497,11 +2497,9 @@ class MainWindow(QMainWindow):
         win.show()
 
     def _open_private_window(self):
-        old_setting = self._settings.get("private_mode", False)
-        self._settings["private_mode"] = True
-        win = MainWindow()
+        win = MainWindow(private_mode=True)
+        win.setWindowTitle(f"Private — {__app_name__}")
         win.show()
-        self._settings["private_mode"] = old_setting
 
     def _reopen_closed_tab(self):
         if not self._closed_tabs:
@@ -2559,6 +2557,9 @@ class MainWindow(QMainWindow):
             try:
                 import http.client, ssl as _ssl, urllib.parse
                 parsed = urllib.parse.urlparse(base)
+                # Registration connects to a user-specified server (likely self-signed
+                # pfSense cert). The server returns a cert fingerprint during
+                # registration, which is used for pinning on all subsequent requests.
                 ctx = _ssl.create_default_context()
                 ctx.check_hostname = False
                 ctx.verify_mode = _ssl.CERT_NONE

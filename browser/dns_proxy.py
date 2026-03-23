@@ -89,12 +89,18 @@ class ShroudSOCKS5Proxy:
     # TLS certificate pinning
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _make_noverify_ctx() -> ssl.SSLContext:
-        """Create a TLS context that skips certificate verification."""
+    def _make_tls_ctx(self) -> ssl.SSLContext:
+        """Create a TLS context.
+
+        When a cert fingerprint is configured, verification is handled by
+        ``_verify_cert_fingerprint`` instead of the CA chain (needed for
+        self-signed pfSense certs).  Otherwise, full CA verification is used.
+        """
         ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        if self._cert_fingerprint:
+            # Self-signed cert — we'll verify the fingerprint manually
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
         return ctx
 
     def _verify_cert_fingerprint(self, sock: ssl.SSLSocket) -> None:
@@ -404,7 +410,7 @@ class ShroudSOCKS5Proxy:
         conn = http.client.HTTPSConnection(
             parsed.hostname,
             parsed.port or 443,
-            context=self._make_noverify_ctx(),
+            context=self._make_tls_ctx(),
             timeout=5,
         )
         try:

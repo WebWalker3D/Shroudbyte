@@ -33,8 +33,13 @@ os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = \
     " --disable-gpu-shader-disk-cache"
 
 # QtWebEngine (Chromium) refuses to run as root without disabling its sandbox.
-# This is safe for a personal desktop browser.
+# Running a browser as root is dangerous — warn the user loudly.
 if os.getuid() == 0:
+    print(
+        "\033[1;31mWARNING: Running as root is not recommended. "
+        "The Chromium sandbox has been disabled.\033[0m",
+        file=sys.stderr,
+    )
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
         os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "") + " --no-sandbox"
     )
