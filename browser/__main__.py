@@ -30,7 +30,9 @@ os.environ["QT_LOGGING_RULES"] = os.environ.get("QT_LOGGING_RULES", "") + \
 os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = \
     os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "") + \
     " --disable-features=AutofillServerCommunication" \
-    " --disable-gpu-shader-disk-cache"
+    " --disable-gpu-shader-disk-cache" \
+    " --force-webrtc-ip-handling-policy=disable_non_proxied_udp" \
+    " --reduced-referrer-granularity"
 
 # QtWebEngine (Chromium) refuses to run as root without disabling its sandbox.
 # Running a browser as root is dangerous — warn the user loudly.

@@ -272,6 +272,10 @@ class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
         if auth:
             info.setHttpHeader(b"Authorization", auth)
 
+        # Strip cross-origin referrers to origin only
+        if self.do_not_track:
+            info.setHttpHeader(b"Referrer-Policy", b"strict-origin-when-cross-origin")
+
         # Determine first-party context for per-page tracking
         # Skip tracking for internal shroud:// pages
         if url.scheme() == "shroud":

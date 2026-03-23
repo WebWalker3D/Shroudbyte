@@ -207,6 +207,28 @@ class ShroudPage(QWebEnginePage):
             self.setFeaturePermission(origin, feature,
                 QWebEnginePage.PermissionPolicy.PermissionDeniedByUser)
 
+    def certificateError(self, error):
+        """Show a warning page for certificate errors instead of silently blocking."""
+        from PyQt6.QtWidgets import QMessageBox
+
+        url = error.url().toString()
+        desc = error.description()
+        msg = (
+            f"The certificate for this site is not trusted.\n\n"
+            f"URL: {url}\n"
+            f"Error: {desc}\n\n"
+            f"This could mean someone is trying to intercept your connection.\n"
+            f"Do you want to proceed anyway?"
+        )
+        reply = QMessageBox.warning(
+            self._view_ref, "Certificate Error",
+            msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            error.acceptCertificate()
+
     def acceptNavigationRequest(self, url, nav_type, is_main_frame):
         """Rewrite loopback IPs to localhost and upgrade http to https."""
         from PyQt6.QtCore import QTimer

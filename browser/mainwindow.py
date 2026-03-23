@@ -257,6 +257,13 @@ class MainWindow(QMainWindow):
         if self._settings.get("vault_backend") == "keyring":
             self._vault.unlock_with_keyring()
         self._password_save_bar = None
+
+        # Vault auto-lock timer (resets on user interaction)
+        from PyQt6.QtCore import QTimer
+        self._vault_lock_timer = QTimer(self)
+        self._vault_lock_timer.setSingleShot(True)
+        self._vault_lock_timer.timeout.connect(self._auto_lock_vault)
+        self._reset_vault_lock_timer()
         self._autofill_bar = None
 
         # Closed tabs stack (for Ctrl+Shift+T)
@@ -1518,6 +1525,13 @@ class MainWindow(QMainWindow):
                     "(document.body&&document.body.innerText||'').split(/\\s+/).length",
                     self._update_reading_time,
                 )
+                # Warn about password fields on HTTP pages
+                if view.url().scheme() == "http":
+                    view.page().runJavaScript(
+                        "!!document.querySelector('input[type=password]')",
+                        lambda has_pw: self._show_http_password_warning()
+                        if has_pw else None,
+                    )
             else:
                 self._reading_time_label.setVisible(False)
             if self._vault.is_unlocked:
@@ -1659,6 +1673,38 @@ class MainWindow(QMainWindow):
         view = self._current_view()
         if view:
             view.triggerPageAction(view.page().WebAction.ReloadAndBypassCache)
+
+    def _show_http_password_warning(self):
+        """Show a warning bar when a password field is found on an HTTP page."""
+        # Don't show if there's already one
+        if hasattr(self, '_http_pw_bar') and self._http_pw_bar:
+            return
+        bar = QFrame()
+        bar.setStyleSheet(
+            f"QFrame {{ background: {style.BG_CARD}; "
+            f"border-bottom: 2px solid {style.RED}; "
+            f"padding: 6px 14px; }}"
+        )
+        h = QHBoxLayout(bar)
+        h.setContentsMargins(12, 6, 12, 6)
+        h.setSpacing(10)
+        label = QLabel(
+            "\u26A0 This page has a login form but is not using HTTPS. "
+            "Your password could be intercepted."
+        )
+        label.setStyleSheet(f"color: {style.RED}; font-size: 13px;")
+        dismiss_btn = QPushButton("Dismiss")
+        dismiss_btn.setStyleSheet(style.DIALOG_BTN_STYLE)
+        dismiss_btn.setFixedHeight(28)
+        dismiss_btn.clicked.connect(lambda: (
+            bar.setParent(None), bar.deleteLater(),
+            setattr(self, '_http_pw_bar', None),
+        ))
+        h.addWidget(label)
+        h.addStretch()
+        h.addWidget(dismiss_btn)
+        self._central_layout.insertWidget(0, bar)
+        self._http_pw_bar = bar
 
     def _update_reading_time(self, word_count):
         """Update the reading time estimate in the status bar."""
@@ -2975,6 +3021,28 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Password manager
     # ------------------------------------------------------------------
+
+    def _reset_vault_lock_timer(self):
+        """Reset the vault auto-lock countdown."""
+        mins = self._settings.get("vault_auto_lock_minutes", 15)
+        if mins > 0 and self._vault.is_unlocked:
+            self._vault_lock_timer.start(mins * 60 * 1000)
+        else:
+            self._vault_lock_timer.stop()
+
+    def _auto_lock_vault(self):
+        """Lock the password vault after idle timeout."""
+        if self._vault.is_unlocked:
+            self._vault.lock()
+            self._status.showMessage("Password vault locked (idle timeout)", 4000)
+
+    def event(self, event):
+        """Reset vault lock timer on user interaction."""
+        etype = event.type()
+        if etype in (QEvent.Type.KeyPress, QEvent.Type.MouseButtonPress):
+            if self._vault.is_unlocked:
+                self._reset_vault_lock_timer()
+        return super().event(event)
 
     def _ensure_vault_unlocked(self) -> bool:
         """Prompt for master password if needed. Returns True if vault is unlocked."""

@@ -122,6 +122,7 @@ DEFAULT_SETTINGS = {
     "annoyance_shield": True,
     "screen_time_tracking": False,
     "clipboard_history": True,
+    "vault_auto_lock_minutes": 15,
 }
 
 

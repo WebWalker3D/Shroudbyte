@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -18,6 +19,17 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtWebEngineCore import QWebEngineDownloadRequest
 
 from . import style
+
+# File extensions that could execute code
+_DANGEROUS_EXTENSIONS = frozenset({
+    ".exe", ".msi", ".bat", ".cmd", ".ps1", ".vbs", ".vbe", ".js", ".wsh",
+    ".wsf", ".scr", ".pif", ".com",  # Windows
+    ".sh", ".bash", ".zsh", ".fish", ".csh", ".ksh",  # Shell scripts
+    ".run", ".bin", ".appimage",  # Linux executables
+    ".deb", ".rpm", ".pkg.tar.zst", ".pkg.tar.xz",  # Packages
+    ".py", ".pl", ".rb", ".php",  # Scripting languages
+    ".jar", ".class",  # Java
+})
 
 
 class DownloadItem(QWidget):
@@ -39,15 +51,26 @@ class DownloadItem(QWidget):
         # File info (name + status stacked)
         info = QVBoxLayout()
         info.setSpacing(1)
-        self._name_label = QLabel(Path(download.downloadFileName()).name)
+        fname = Path(download.downloadFileName()).name
+        # Show source domain so user knows where the download came from
+        source_page = download.page()
+        source_host = ""
+        if source_page and source_page.url().host():
+            source_host = source_page.url().host()
+        self._name_label = QLabel(fname)
         self._name_label.setStyleSheet(
             f"font-weight: 600; font-size: 12px; color: {style.TEXT};"
             f" border: none; background: transparent;"
         )
         self._name_label.setMaximumWidth(200)
         self._name_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        tooltip = f"File: {fname}\nFrom: {download.url().toString()}"
+        if source_host:
+            tooltip += f"\nInitiated by: {source_host}"
+        self._name_label.setToolTip(tooltip)
 
-        self._status_label = QLabel("Starting\u2026")
+        initial_status = f"from {source_host}" if source_host else "Starting\u2026"
+        self._status_label = QLabel(initial_status)
         self._status_label.setStyleSheet(
             f"font-size: 11px; color: {style.TEXT_DIM}; border: none; background: transparent;"
         )
@@ -62,6 +85,16 @@ class DownloadItem(QWidget):
         self._progress.setTextVisible(False)
 
         # Buttons
+        self._pause_btn = QPushButton("\u23F8")
+        self._pause_btn.setToolTip("Pause download")
+        self._pause_btn.setStyleSheet(
+            f"QPushButton {{ border: none; border-radius: 4px; background: transparent;"
+            f" color: {style.TEXT_FAINT}; font-size: 14px; min-width: 24px; max-width: 24px;"
+            f" min-height: 24px; max-height: 24px; }}"
+            f"QPushButton:hover {{ background: {style.BG_HOVER}; color: {style.TEXT}; }}"
+        )
+        self._pause_btn.clicked.connect(self._toggle_pause)
+
         self._cancel_btn = QPushButton("\u2715")
         self._cancel_btn.setToolTip("Cancel download")
         self._cancel_btn.setStyleSheet(
@@ -85,8 +118,17 @@ class DownloadItem(QWidget):
 
         layout.addLayout(info, 1)
         layout.addWidget(self._progress)
+        layout.addWidget(self._pause_btn)
         layout.addWidget(self._cancel_btn)
         layout.addWidget(self._open_btn)
+
+        # Warn if file type is potentially dangerous
+        fname = download.downloadFileName()
+        if any(fname.lower().endswith(ext) for ext in _DANGEROUS_EXTENSIONS):
+            self._status_label.setText("\u26A0 Executable file")
+            self._status_label.setStyleSheet(
+                f"font-size: 11px; color: {style.YELLOW}; border: none; background: transparent;"
+            )
 
         download.receivedBytesChanged.connect(self._update_progress)
         download.stateChanged.connect(self._state_changed)
@@ -119,6 +161,7 @@ class DownloadItem(QWidget):
             self._status_label.setStyleSheet(
                 f"font-size: 11px; color: {style.GREEN}; border: none; background: transparent;"
             )
+            self._pause_btn.setVisible(False)
             self._cancel_btn.setVisible(False)
             self._open_btn.setVisible(True)
         elif state == QWebEngineDownloadRequest.DownloadState.DownloadCancelled:
@@ -127,6 +170,7 @@ class DownloadItem(QWidget):
             self._status_label.setStyleSheet(
                 f"font-size: 11px; color: {style.TEXT_FAINT}; border: none; background: transparent;"
             )
+            self._pause_btn.setVisible(False)
             self._cancel_btn.setVisible(False)
         elif state == QWebEngineDownloadRequest.DownloadState.DownloadInterrupted:
             self._progress.setVisible(False)
@@ -134,15 +178,42 @@ class DownloadItem(QWidget):
             self._status_label.setStyleSheet(
                 f"font-size: 11px; color: {style.RED}; border: none; background: transparent;"
             )
+            self._pause_btn.setVisible(False)
             self._cancel_btn.setVisible(False)
+
+    def _toggle_pause(self):
+        if self._download.isPaused():
+            self._download.resume()
+            self._pause_btn.setText("\u23F8")
+            self._pause_btn.setToolTip("Pause download")
+        else:
+            self._download.pause()
+            self._pause_btn.setText("\u25B6")
+            self._pause_btn.setToolTip("Resume download")
+            self._status_label.setText("Paused")
 
     def _cancel(self):
         self._download.cancel()
 
     def _open_file(self):
         path = self._download.downloadDirectory() + "/" + self._download.downloadFileName()
-        if os.path.exists(path):
-            subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if not os.path.exists(path):
+            return
+        name = self._download.downloadFileName()
+        if any(name.lower().endswith(ext) for ext in _DANGEROUS_EXTENSIONS):
+            reply = QMessageBox.warning(
+                self, "Potentially Dangerous File",
+                f'"{name}" is an executable file.\n\n'
+                "Opening it could harm your computer. Are you sure?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        subprocess.Popen(
+            ["xdg-open", path],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
 
 
 class DownloadShelf(QFrame):
