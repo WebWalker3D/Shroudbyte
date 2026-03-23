@@ -119,6 +119,7 @@ DEFAULT_SETTINGS = {
     "page_watch_interval": 3600,
     "remember_scroll_position": True,
     "form_draft_autosave": True,
+    "annoyance_shield": True,
 }
 
 

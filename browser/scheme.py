@@ -855,6 +855,13 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
           <label class="toggle"><input type="checkbox" id="form_draft_autosave"
             {_chk('form_draft_autosave', True)}><span class="slider"></span></label>
         </div>
+        <div class="row">
+          <div class="row-label">Annoyance shield
+            <div class="row-hint">Block modals, cookie popups, chat widgets, newsletter overlays</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="annoyance_shield"
+            {_chk('annoyance_shield', True)}><span class="slider"></span></label>
+        </div>
       </div>
 
       <div class="section">
@@ -982,6 +989,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         page_watch_interval: getVal('page_watch_interval') * 60,
         auto_delete_cookies: getVal('auto_delete_cookies'),
         form_draft_autosave: getVal('form_draft_autosave'),
+        annoyance_shield: getVal('annoyance_shield'),
         remember_scroll_position: getVal('remember_scroll_position'),
         dns_over_https: getVal('dns_over_https'),
         dns_over_https_provider: getVal('dns_over_https_provider'),

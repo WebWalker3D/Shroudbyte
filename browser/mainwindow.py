@@ -55,6 +55,7 @@ from . import __app_name__, __version__, storage
 from .adblock import AdBlockInterceptor
 from .downloads import DownloadShelf
 from . import filterlists
+from .annoyance_shield import get_annoyance_shield_js
 from .fingerprint import get_fingerprint_resistance_js
 from .passwords import PasswordVault
 from .passworddialogs import (
@@ -1145,6 +1146,9 @@ class MainWindow(QMainWindow):
                 # Inject fingerprint resistance
                 if self._settings.get("fingerprint_resistance", False):
                     view.page().runJavaScript(get_fingerprint_resistance_js())
+                # Inject annoyance shield
+                if self._settings.get("annoyance_shield", True):
+                    view.page().runJavaScript(get_annoyance_shield_js())
                 # Inject Link Intelligence hover tooltips
                 if self._settings.get("link_intelligence", True):
                     view.page().runJavaScript(self._get_link_intel_js())
@@ -2136,7 +2140,7 @@ class MainWindow(QMainWindow):
                 "default_zoom", "user_agent", "https_only", "do_not_track",
                 "restore_session", "strip_tracking", "fingerprint_resistance",
                 "link_intelligence", "page_watch_interval", "auto_delete_cookies",
-                "form_draft_autosave", "remember_scroll_position",
+                "form_draft_autosave", "annoyance_shield", "remember_scroll_position",
                 "dns_over_https", "dns_over_https_provider", "custom_dns_fallback",
             ):
                 if key in s:
