@@ -22,6 +22,7 @@ _WATCH_ACTION_PREFIX = "__SHROUD_WATCH__:"
 _SETTINGS_ACTION_PREFIX = "__SHROUD_SETTINGS__:"
 _PAGE_ACT_PREFIX = "__SHROUD_PAGE_ACT__:"
 _FORM_DRAFT_PREFIX = "__SHROUD_FORM_DRAFT__:"
+_CLIP_PREFIX = "__SHROUD_CLIP__:"
 
 # Shared set of hosts known NOT to require HTTP auth.
 # Populated on successful HEAD checks; avoids repeat probes.
@@ -126,6 +127,14 @@ class ShroudPage(QWebEnginePage):
                     mw._handle_form_draft(data)
             except Exception:
                 pass
+            return
+        if message.startswith(_CLIP_PREFIX):
+            text = message[len(_CLIP_PREFIX):]
+            if text:
+                mw = self._get_main_window()
+                if mw and hasattr(mw, "_clipboard_history"):
+                    url = self.url().toString() if self._view_ref else ""
+                    mw._clipboard_history.record(text, url)
             return
         super().javaScriptConsoleMessage(level, message, lineNumber, sourceID)
 
@@ -272,6 +281,7 @@ class ShroudWebView(QWebEngineView):
         page = ShroudPage(profile, self)
         page._view_ref = self
         self.setPage(page)
+        pass  # page setup complete
 
     def create_window_requested(self):
         """Called when the page wants to open a new window/tab."""
@@ -320,7 +330,7 @@ class ShroudWebView(QWebEngineView):
             open_tab = menu.addAction("Open Link in New Tab")
             open_tab.triggered.connect(lambda: self._open_in_new_tab(link_url))
             copy_link = menu.addAction("Copy Link Address")
-            copy_link.triggered.connect(lambda: QApplication.clipboard().setText(link_url.toString()))
+            copy_link.triggered.connect(lambda: self._copy_and_record(link_url.toString()))
             menu.addSeparator()
 
         # Image actions
@@ -328,7 +338,7 @@ class ShroudWebView(QWebEngineView):
             open_img = menu.addAction("Open Image in New Tab")
             open_img.triggered.connect(lambda: self._open_in_new_tab(media_url))
             copy_img = menu.addAction("Copy Image URL")
-            copy_img.triggered.connect(lambda: QApplication.clipboard().setText(media_url.toString()))
+            copy_img.triggered.connect(lambda: self._copy_and_record(media_url.toString()))
             save_img = menu.addAction("Save Image As\u2026")
             save_img.triggered.connect(lambda: self.triggerPageAction(QWebEnginePage.WebAction.DownloadMediaToDisk))
             menu.addSeparator()
@@ -342,9 +352,57 @@ class ShroudWebView(QWebEngineView):
         # Selected text actions
         if selected_text:
             copy_act = menu.addAction("Copy")
-            copy_act.triggered.connect(lambda: self.triggerPageAction(QWebEnginePage.WebAction.Copy))
+            copy_act.triggered.connect(lambda: self._copy_and_record(selected_text))
             search_act = menu.addAction(f"Search for \"{selected_text[:30]}{'...' if len(selected_text) > 30 else ''}\"")
             search_act.triggered.connect(lambda: self._search_text(selected_text))
+            menu.addSeparator()
+
+        # Clipboard history submenu
+        if self._tab_widget and hasattr(self._tab_widget, "_clipboard_history"):
+            clip_menu = menu.addMenu("Clipboard History")
+            clip_menu.setStyleSheet(menu.styleSheet())
+            entries = self._tab_widget._clipboard_history.get_history()
+            if entries:
+                for entry in entries[:15]:
+                    text = entry["text"]
+                    is_url = text.startswith("http://") or text.startswith("https://")
+                    if is_url:
+                        display = text[:60] + ("\u2026" if len(text) > 60 else "")
+                        label = f"url: {display}"
+                    else:
+                        display = entry["preview"][:50]
+                        if len(entry["preview"]) > 50:
+                            display += "\u2026"
+                        label = f"text: {display}"
+                    act = clip_menu.addAction(label)
+                    if is_url:
+                        # Click opens URL in new tab
+                        act.triggered.connect(
+                            lambda _, t=text: (
+                                QApplication.clipboard().setText(t),
+                                self._open_in_new_tab(QUrl(t)),
+                            )
+                        )
+                    elif len(text) > 100:
+                        # Large text — click opens in viewer window
+                        act.triggered.connect(
+                            lambda _, t=text: (
+                                QApplication.clipboard().setText(t),
+                                self._show_clip_text(t),
+                            )
+                        )
+                    else:
+                        act.triggered.connect(
+                            lambda _, t=text: QApplication.clipboard().setText(t)
+                        )
+                clip_menu.addSeparator()
+                clear_act = clip_menu.addAction("Clear History")
+                clear_act.triggered.connect(
+                    lambda: self._tab_widget._clipboard_history.clear()
+                )
+            else:
+                empty_act = clip_menu.addAction("(empty)")
+                empty_act.setEnabled(False)
             menu.addSeparator()
 
         # Page-level actions (always present)
@@ -409,6 +467,29 @@ class ShroudWebView(QWebEngineView):
         })()
         """
         self.page().runJavaScript(js)
+
+    def _show_clip_text(self, text):
+        """Open copied text in a small viewer window."""
+        from . import style
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Copied Text")
+        dialog.setMinimumSize(480, 320)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(0, 0, 0, 0)
+        from PyQt6.QtWidgets import QTextEdit
+        editor = QTextEdit()
+        editor.setReadOnly(True)
+        editor.setPlainText(text)
+        editor.setStyleSheet(style.SOURCE_EDITOR_STYLE)
+        layout.addWidget(editor)
+        dialog.exec()
+
+    def _copy_and_record(self, text):
+        """Copy text to clipboard and record in clipboard history."""
+        QApplication.clipboard().setText(text)
+        if self._tab_widget and hasattr(self._tab_widget, "_clipboard_history"):
+            url = self.url().toString()
+            self._tab_widget._clipboard_history.record(text, url)
 
     def _start_watching(self):
         if self._tab_widget and hasattr(self._tab_widget, "_add_page_watch"):

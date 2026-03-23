@@ -121,6 +121,7 @@ DEFAULT_SETTINGS = {
     "form_draft_autosave": True,
     "annoyance_shield": True,
     "screen_time_tracking": False,
+    "clipboard_history": True,
 }
 
 

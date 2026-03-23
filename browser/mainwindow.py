@@ -9,7 +9,7 @@ import sys
 import time
 from functools import partial
 
-from PyQt6.QtCore import Qt, QUrl, QSize, QSortFilterProxyModel, QModelIndex
+from PyQt6.QtCore import Qt, QUrl, QSize, QSortFilterProxyModel, QModelIndex, QEvent, QObject
 from PyQt6.QtGui import QAction, QIcon, QKeySequence, QFont, QPalette, QColor
 from PyQt6.QtWebEngineCore import (
     QWebEnginePage, QWebEngineProfile, QWebEngineScript, QWebEngineSettings,
@@ -56,6 +56,7 @@ from .adblock import AdBlockInterceptor
 from .downloads import DownloadShelf
 from . import filterlists
 from .annoyance_shield import get_annoyance_shield_js
+from .clipboard_history import ClipboardHistory
 from .fingerprint import get_fingerprint_resistance_js
 from .passwords import PasswordVault
 from .passworddialogs import (
@@ -142,6 +143,32 @@ class _SuggestionDelegate(QStyledItemDelegate):
         return QSize(0, 30)
 
 
+class _CopyEventFilter(QObject):
+    """App-level event filter that catches Ctrl+C for clipboard history.
+
+    Installed on QApplication so it sees key events before Chromium's
+    internal widget can consume them.
+    """
+
+    def __init__(self, main_window):
+        super().__init__(main_window)
+        self._mw = main_window
+
+    def eventFilter(self, obj, event):
+        if (event.type() == QEvent.Type.KeyPress
+                and event.key() == Qt.Key.Key_C
+                and event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            view = self._mw._current_view()
+            if view and hasattr(view, "page"):
+                url = view.url().toString()
+                ch = self._mw._clipboard_history
+                view.page().runJavaScript(
+                    "window.getSelection().toString()",
+                    lambda text: ch.record(text, url) if text else None,
+                )
+        return False  # never consume — let the actual copy happen
+
+
 class MainWindow(QMainWindow):
     # Signal for thread-safe delivery of link intelligence results.
     # Emitted from the resolver's background thread; the connected slot
@@ -203,6 +230,19 @@ class MainWindow(QMainWindow):
             self._settings.get("screen_time_tracking", False),
             self._private_mode,
         )
+
+        # Clipboard History (in-memory only, dies with session)
+        self._clipboard_history = ClipboardHistory(
+            get_current_url=lambda: (
+                self._current_view().url().toString()
+                if self._current_view() else ""
+            ),
+        )
+        self._clipboard_history.set_enabled(
+            self._settings.get("clipboard_history", True) and not self._private_mode
+        )
+        self._copy_filter = _CopyEventFilter(self)
+        QApplication.instance().installEventFilter(self._copy_filter)
 
         # Early content-blocking script (runs at document creation before page scripts)
         if self._settings.get("enable_adblock", True):
@@ -2159,6 +2199,7 @@ class MainWindow(QMainWindow):
                 "link_intelligence", "page_watch_interval", "auto_delete_cookies",
                 "form_draft_autosave", "annoyance_shield",
                 "remember_scroll_position", "screen_time_tracking",
+                "clipboard_history",
                 "dns_over_https", "dns_over_https_provider", "custom_dns_fallback",
             ):
                 if key in s:
@@ -2253,6 +2294,9 @@ class MainWindow(QMainWindow):
 
         self._adblocker.do_not_track = self._settings["do_not_track"]
         self._screen_time.set_enabled(self._settings.get("screen_time_tracking", False))
+        self._clipboard_history.set_enabled(
+            self._settings.get("clipboard_history", True) and not self._private_mode
+        )
 
     def _placeholder_deleted(self):
         pass  # _show_settings_OLD was here — replaced by shroud://settings

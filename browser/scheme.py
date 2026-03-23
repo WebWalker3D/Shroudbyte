@@ -873,6 +873,13 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
           <label class="toggle"><input type="checkbox" id="screen_time_tracking"
             {_chk('screen_time_tracking')}><span class="slider"></span></label>
         </div>
+        <div class="row">
+          <div class="row-label">Clipboard history
+            <div class="row-hint">Track copied text in-memory during the session (never saved to disk)</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="clipboard_history"
+            {_chk('clipboard_history', True)}><span class="slider"></span></label>
+        </div>
       </div>
 
       <div class="section">
@@ -1002,6 +1009,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         form_draft_autosave: getVal('form_draft_autosave'),
         annoyance_shield: getVal('annoyance_shield'),
         screen_time_tracking: getVal('screen_time_tracking'),
+        clipboard_history: getVal('clipboard_history'),
         remember_scroll_position: getVal('remember_scroll_position'),
         dns_over_https: getVal('dns_over_https'),
         dns_over_https_provider: getVal('dns_over_https_provider'),
