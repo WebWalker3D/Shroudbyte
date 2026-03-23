@@ -120,6 +120,7 @@ DEFAULT_SETTINGS = {
     "remember_scroll_position": True,
     "form_draft_autosave": True,
     "annoyance_shield": True,
+    "screen_time_tracking": False,
 }
 
 
@@ -471,6 +472,32 @@ def remove_form_draft(url: str):
     if url in drafts:
         del drafts[url]
         _save_json("form_drafts.json", drafts)
+
+
+# ---------------------------------------------------------------------------
+# Screen time tracking
+# ---------------------------------------------------------------------------
+
+def load_screen_time() -> dict:
+    """Load screen time data. Returns {domain: {date_str: seconds}}."""
+    return _load_json("screen_time.json", {})
+
+
+def save_screen_time(data: dict):
+    _save_json("screen_time.json", data)
+
+
+def add_screen_time(domain: str, date_str: str, seconds: int):
+    """Add seconds to a domain's time for a given date."""
+    data = load_screen_time()
+    if domain not in data:
+        data[domain] = {}
+    data[domain][date_str] = data[domain].get(date_str, 0) + seconds
+    _save_json("screen_time.json", data)
+
+
+def clear_screen_time():
+    _save_json("screen_time.json", {})
 
 
 # ---------------------------------------------------------------------------

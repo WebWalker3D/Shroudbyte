@@ -39,6 +39,7 @@ _PAGES = {
     "history": "History",
     "privacy": "Privacy Dashboard",
     "watches": "Page Watches",
+    "screentime": "Screen Time",
     "about": "About Shroudbyte",
     "shortcuts": "Keyboard Shortcuts",
 }
@@ -69,6 +70,8 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
             html = self._page_privacy()
         elif host == "watches":
             html = self._page_watches()
+        elif host == "screentime":
+            html = self._page_screentime()
         elif host == "about":
             html = self._page_about()
         elif host == "shortcuts":
@@ -94,6 +97,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         ("history", "\u29D6", "History"),
         ("privacy", "\u26E8", "Privacy"),
         ("watches", "\u25CE", "Page Watches"),
+        ("screentime", "\u231A", "Screen Time"),
         ("shortcuts", "\u2328", "Shortcuts"),
         ("about", "\u2139", "About"),
     ]
@@ -862,6 +866,13 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
           <label class="toggle"><input type="checkbox" id="annoyance_shield"
             {_chk('annoyance_shield', True)}><span class="slider"></span></label>
         </div>
+        <div class="row">
+          <div class="row-label">Screen time tracking
+            <div class="row-hint">Track time per domain (opt-in, local only, domain-level)</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="screen_time_tracking"
+            {_chk('screen_time_tracking')}><span class="slider"></span></label>
+        </div>
       </div>
 
       <div class="section">
@@ -990,6 +1001,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         auto_delete_cookies: getVal('auto_delete_cookies'),
         form_draft_autosave: getVal('form_draft_autosave'),
         annoyance_shield: getVal('annoyance_shield'),
+        screen_time_tracking: getVal('screen_time_tracking'),
         remember_scroll_position: getVal('remember_scroll_position'),
         dns_over_https: getVal('dns_over_https'),
         dns_over_https_provider: getVal('dns_over_https_provider'),
@@ -1027,6 +1039,154 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
   </script>
 </body>
 </html>"""
+
+    def _page_screentime(self):
+        """Generate the shroud://screentime dashboard."""
+        import time as _time
+        from datetime import datetime, timedelta
+
+        # Flush pending data so the page shows the latest
+        mw = self.parent()
+        if hasattr(mw, "_screen_time"):
+            mw._screen_time._flush()
+
+        data = storage.load_screen_time()
+        today = _time.strftime("%Y-%m-%d")
+
+        # Compute date strings for last 7 days
+        dates_7d = []
+        for i in range(7):
+            d = datetime.now() - timedelta(days=i)
+            dates_7d.append(d.strftime("%Y-%m-%d"))
+
+        def _fmt(secs):
+            if secs < 60:
+                return f"{secs}s"
+            if secs < 3600:
+                return f"{secs // 60}m {secs % 60}s"
+            h = secs // 3600
+            m = (secs % 3600) // 60
+            return f"{h}h {m}m"
+
+        # Today's data — sorted by time
+        today_domains = []
+        for domain, days in data.items():
+            t = days.get(today, 0)
+            if t > 0:
+                today_domains.append((domain, t))
+        today_domains.sort(key=lambda x: -x[1])
+        today_total = sum(t for _, t in today_domains)
+
+        # 7-day data
+        week_domains: dict[str, int] = {}
+        for domain, days in data.items():
+            total = sum(days.get(d, 0) for d in dates_7d)
+            if total > 0:
+                week_domains[domain] = total
+        week_sorted = sorted(week_domains.items(), key=lambda x: -x[1])
+        week_total = sum(t for _, t in week_sorted)
+
+        # Build today rows
+        if today_domains:
+            max_today = today_domains[0][1] if today_domains else 1
+            today_rows = ""
+            for domain, secs in today_domains[:30]:
+                pct = min(100, int(secs / max(max_today, 1) * 100))
+                esc_d = html_mod.escape(domain)
+                today_rows += (
+                    f'<div class="time-row">'
+                    f'<span class="time-domain">{esc_d}</span>'
+                    f'<div class="time-bar-bg"><div class="time-bar" style="width:{pct}%"></div></div>'
+                    f'<span class="time-val">{_fmt(secs)}</span>'
+                    f'</div>'
+                )
+        else:
+            today_rows = '<div class="empty">No browsing data for today.</div>'
+
+        # Build week rows
+        if week_sorted:
+            max_week = week_sorted[0][1] if week_sorted else 1
+            week_rows = ""
+            for domain, secs in week_sorted[:30]:
+                pct = min(100, int(secs / max(max_week, 1) * 100))
+                esc_d = html_mod.escape(domain)
+                week_rows += (
+                    f'<div class="time-row">'
+                    f'<span class="time-domain">{esc_d}</span>'
+                    f'<div class="time-bar-bg"><div class="time-bar" style="width:{pct}%"></div></div>'
+                    f'<span class="time-val">{_fmt(secs)}</span>'
+                    f'</div>'
+                )
+        else:
+            week_rows = '<div class="empty">No browsing data for the past 7 days.</div>'
+
+        enabled = self.parent()._settings.get("screen_time_tracking", False)
+        status = (
+            f'<div class="section-desc" style="color:{GREEN}">Tracking is enabled.</div>'
+            if enabled else
+            f'<div class="section-desc" style="color:{TEXT_FAINT}">'
+            f'Tracking is disabled. Enable it in <a href="shroud://settings#privacy" '
+            f'style="color:{ACCENT}">Settings</a>.</div>'
+        )
+
+        extra_css = f"""
+  .time-row {{
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 0;
+  }}
+  .time-row + .time-row {{ border-top: 1px solid {BORDER}; }}
+  .time-domain {{
+    font-size: 13px; color: {TEXT}; min-width: 160px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }}
+  .time-bar-bg {{
+    flex: 1; height: 6px; background: {BG_ACTIVE};
+    border-radius: 3px; overflow: hidden;
+  }}
+  .time-bar {{
+    height: 100%; background: {ACCENT};
+    border-radius: 3px; transition: width 0.3s ease;
+  }}
+  .time-val {{
+    font-size: 12px; color: {TEXT_DIM}; min-width: 70px; text-align: right;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  }}"""
+
+        content = f"""
+    {status}
+    <div class="stat-row" style="grid-template-columns:repeat(2,1fr)">
+      <div class="stat-card">
+        <div class="stat-num">{_fmt(today_total)}</div>
+        <div class="stat-label">Today</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">{_fmt(week_total)}</div>
+        <div class="stat-label">Past 7 Days</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Today</div>
+      <div class="card card-padded">
+        {today_rows}
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Past 7 Days</div>
+      <div class="card card-padded">
+        {week_rows}
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;margin-top:8px;">
+      <button class="act-btn danger" onclick="if(confirm('Clear all screen time data?')){{
+        console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify({{action:'clear_screentime',arg:''}}));
+        setTimeout(function(){{ location.reload(); }}, 200);
+      }}">Clear All Data</button>
+    </div>"""
+
+        return self._wrap("Screen Time", "screentime", content, extra_css=extra_css)
 
     def _page_watches(self):
         """Generate the shroud://watches page watch management page."""

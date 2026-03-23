@@ -69,6 +69,7 @@ from .scheme import ShroudSchemeHandler
 from .webview import ShroudWebView
 from .link_intel import LinkResolver
 from .pagewatcher import PageWatcher
+from .screentime import ScreenTimeTracker
 from .privacy_panel import PrivacyPanel
 from . import style
 
@@ -195,6 +196,13 @@ class MainWindow(QMainWindow):
         # Page Watcher
         self._page_watcher = PageWatcher(self)
         self._page_watcher.page_changed.connect(self._on_page_watch_changed)
+
+        # Screen Time Tracker
+        self._screen_time = ScreenTimeTracker(self)
+        self._screen_time.start(
+            self._settings.get("screen_time_tracking", False),
+            self._private_mode,
+        )
 
         # Early content-blocking script (runs at document creation before page scripts)
         if self._settings.get("enable_adblock", True):
@@ -580,6 +588,8 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(self._make_action("Site Permissions\u2026", self._show_permissions))
         tools_menu.addAction(self._make_action("Page Watches",
             lambda: self.add_new_tab(QUrl("shroud://watches"))))
+        tools_menu.addAction(self._make_action("Screen Time",
+            lambda: self.add_new_tab(QUrl("shroud://screentime"))))
         tools_menu.addAction(self._make_action("Clear Browsing Data\u2026", self._show_clear_data))
         tools_menu.addSeparator()
         tools_menu.addAction(self._make_action("Settings", self._show_settings))
@@ -831,6 +841,8 @@ class MainWindow(QMainWindow):
             self._update_title(view.title())
             self._update_bookmark_btn(view.url())
             self._update_reader_btn()
+            if view.url().scheme() not in ("shroud", ""):
+                self._screen_time.set_domain(view.url().host())
 
     def _tab_url_changed(self, view, url):
         # Handle newtab search handoff: the JS sets the hash to
@@ -870,6 +882,8 @@ class MainWindow(QMainWindow):
         if view == self._current_view():
             self._update_url_bar(url)
             self._update_bookmark_btn(url)
+            if url.scheme() not in ("shroud", ""):
+                self._screen_time.set_domain(url.host())
 
     def _tab_title_changed(self, view, title):
         index = self._tabs.indexOf(view)
@@ -1777,6 +1791,9 @@ class MainWindow(QMainWindow):
         elif action == "clear_history":
             storage.clear_history()
             self._status.showMessage("History cleared", 2000)
+        elif action == "clear_screentime":
+            storage.clear_screen_time()
+            self._status.showMessage("Screen time data cleared", 2000)
 
     def _show_bookmarks(self):
         view = self._current_view()
@@ -2140,7 +2157,8 @@ class MainWindow(QMainWindow):
                 "default_zoom", "user_agent", "https_only", "do_not_track",
                 "restore_session", "strip_tracking", "fingerprint_resistance",
                 "link_intelligence", "page_watch_interval", "auto_delete_cookies",
-                "form_draft_autosave", "annoyance_shield", "remember_scroll_position",
+                "form_draft_autosave", "annoyance_shield",
+                "remember_scroll_position", "screen_time_tracking",
                 "dns_over_https", "dns_over_https_provider", "custom_dns_fallback",
             ):
                 if key in s:
@@ -2234,6 +2252,7 @@ class MainWindow(QMainWindow):
                 v.page().https_only = self._settings["https_only"]
 
         self._adblocker.do_not_track = self._settings["do_not_track"]
+        self._screen_time.set_enabled(self._settings.get("screen_time_tracking", False))
 
     def _placeholder_deleted(self):
         pass  # _show_settings_OLD was here — replaced by shroud://settings
@@ -3633,8 +3652,9 @@ class MainWindow(QMainWindow):
                 storage.save_session(tabs)
             else:
                 storage.clear_session()
-        # Stop page watcher
+        # Stop page watcher and screen time tracker
         self._page_watcher.stop()
+        self._screen_time.stop()
         # Lock the password vault
         self._vault.lock()
 
