@@ -67,15 +67,17 @@ _proxy_instance = None
 _dns_secret = _storage.get_dns_secret(_settings)
 _dns_fingerprint = _storage.get_dns_cert_fingerprint(_settings)
 
-# Migrate legacy plaintext secrets to keyring on first launch
-if _dns_secret and _settings.get("custom_dns_secret"):
-    from . import keyring_backend as _kb
-    if _kb.is_available():
-        if _kb.store_secret("dns_secret", _dns_secret):
-            _settings["custom_dns_secret"] = ""
-        if _dns_fingerprint and _kb.store_secret("dns_cert_fingerprint", _dns_fingerprint):
-            _settings["custom_dns_cert_fingerprint"] = ""
-        _storage.save_settings(_settings)
+
+def _deferred_dns_secret_migration():
+    """Migrate legacy plaintext DNS secrets to keyring (runs after window shown)."""
+    if _dns_secret and _settings.get("custom_dns_secret"):
+        from . import keyring_backend as _kb
+        if _kb.is_available():
+            if _kb.store_secret("dns_secret", _dns_secret):
+                _settings["custom_dns_secret"] = ""
+            if _dns_fingerprint and _kb.store_secret("dns_cert_fingerprint", _dns_fingerprint):
+                _settings["custom_dns_cert_fingerprint"] = ""
+            _storage.save_settings(_settings)
 
 if _settings.get("custom_dns_enabled") and _settings.get("custom_dns_server") and _dns_secret:
     # Custom authenticated DNS via local SOCKS5 proxy.
@@ -274,6 +276,10 @@ def main():
                 splash_proc.terminate()
                 splash_proc.wait()
                 splash_proc = None
+
+        # Defer keyring migration until after the window is shown
+        from PyQt6.QtCore import QTimer as _QTimer
+        _QTimer.singleShot(0, _deferred_dns_secret_migration)
 
         ret = app.exec()
 

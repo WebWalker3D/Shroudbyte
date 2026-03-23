@@ -1,8 +1,10 @@
 """Encrypted password vault for Shroudbyte.
 
-Uses Fernet (AES-128-CBC + HMAC) with a PBKDF2-derived key from a master password.
+Uses AES-256-GCM with an Argon2id-derived key from a master password.
 Vault stored as an encrypted JSON blob at ~/.shroudbyte/passwords.enc
 Salt stored at ~/.shroudbyte/passwords.salt
+
+Legacy vaults (Fernet / PBKDF2) are auto-migrated on first unlock.
 """
 
 import base64
@@ -17,15 +19,28 @@ from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 
+from . import crypto
 from .storage import DATA_DIR, _ensure_dir
 
 SALT_FILE = "passwords.salt"
 VAULT_FILE = "passwords.enc"
 VERIFY_FILE = "passwords.verify"
+
+# Legacy constant — only used when reading old PBKDF2/Fernet vaults
 _KDF_ITERATIONS = 100_000
 
 
+# ------------------------------------------------------------------
+# Key derivation helpers
+# ------------------------------------------------------------------
+
 def _derive_key(master_password: str, salt: bytes) -> bytes:
+    """Derive a 32-byte AES-256 key using Argon2id (or PBKDF2 fallback)."""
+    return crypto.derive_key_argon2id(master_password, salt)
+
+
+def _derive_key_legacy(master_password: str, salt: bytes) -> bytes:
+    """Legacy PBKDF2 derivation that produces a Fernet-compatible key."""
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
@@ -40,8 +55,10 @@ class PasswordVault:
 
     def __init__(self):
         self._entries: list[dict] = []
-        self._fernet: Fernet | None = None
+        self._key: bytes | None = None       # 32-byte AES key (modern)
+        self._fernet: Fernet | None = None    # Only set for legacy/keyring paths
         self._unlocked = False
+        self._is_modern = False               # True when using AES-256-GCM
 
     # ------------------------------------------------------------------
     # Master password management
@@ -55,16 +72,19 @@ class PasswordVault:
     def setup(self, master_password: str):
         """Create a new vault with the given master password."""
         _ensure_dir()
-        salt = os.urandom(16)
+        salt = os.urandom(32)
         (DATA_DIR / SALT_FILE).write_bytes(salt)
 
         key = _derive_key(master_password, salt)
-        f = Fernet(key)
 
         # Store an encrypted sentinel so we can verify the password later
-        (DATA_DIR / VERIFY_FILE).write_bytes(f.encrypt(b"shroudbyte-vault"))
+        (DATA_DIR / VERIFY_FILE).write_bytes(
+            crypto.encrypt_aead(b"shroudbyte-vault", key)
+        )
 
-        self._fernet = f
+        self._key = key
+        self._fernet = None
+        self._is_modern = True
         self._entries = []
         self._unlocked = True
         self._save()
@@ -79,24 +99,70 @@ class PasswordVault:
             return False
 
         salt = salt_path.read_bytes()
+        verify_blob = verify_path.read_bytes()
+
+        # Detect format: modern blobs start with VAULT_VERSION byte (2)
+        if len(verify_blob) > 0 and verify_blob[0] == crypto.VAULT_VERSION:
+            return self._unlock_modern(master_password, salt, verify_blob)
+        else:
+            return self._unlock_legacy(master_password, salt, verify_blob)
+
+    def _unlock_modern(self, master_password: str, salt: bytes,
+                       verify_blob: bytes) -> bool:
+        """Unlock a modern AES-256-GCM vault."""
         key = _derive_key(master_password, salt)
-        f = Fernet(key)
+        try:
+            crypto.decrypt_aead(verify_blob, key)
+        except Exception:
+            return False
+
+        self._key = key
+        self._fernet = None
+        self._is_modern = True
+        self._unlocked = True
+        self._load()
+        return True
+
+    def _unlock_legacy(self, master_password: str, salt: bytes,
+                       verify_blob: bytes) -> bool:
+        """Unlock a legacy Fernet vault and auto-migrate to modern crypto."""
+        legacy_key = _derive_key_legacy(master_password, salt)
+        f = Fernet(legacy_key)
 
         try:
-            f.decrypt(verify_path.read_bytes())
+            f.decrypt(verify_blob)
         except InvalidToken:
             return False
 
+        # Temporarily use Fernet to load existing entries
         self._fernet = f
+        self._key = None
+        self._is_modern = False
         self._unlocked = True
         self._load()
+
+        # --- Auto-migrate to modern crypto ---
+        new_salt = os.urandom(32)
+        new_key = _derive_key(master_password, new_salt)
+
+        (DATA_DIR / SALT_FILE).write_bytes(new_salt)
+        (DATA_DIR / VERIFY_FILE).write_bytes(
+            crypto.encrypt_aead(b"shroudbyte-vault", new_key)
+        )
+
+        self._key = new_key
+        self._fernet = None
+        self._is_modern = True
+        self._save()
         return True
 
     def lock(self):
         """Lock the vault, clearing decrypted data from memory."""
         self._entries = []
+        self._key = None
         self._fernet = None
         self._unlocked = False
+        self._is_modern = False
 
     @property
     def is_unlocked(self) -> bool:
@@ -107,24 +173,28 @@ class PasswordVault:
     # ------------------------------------------------------------------
 
     def setup_with_keyring(self):
-        """Create a new vault with a random Fernet key stored in the OS keyring."""
+        """Create a new vault with a random AES-256 key stored in the OS keyring."""
         from . import keyring_backend
 
         _ensure_dir()
-        key = Fernet.generate_key()
-        if not keyring_backend.store_secret("vault_fernet_key", key.decode("ascii")):
+        key = os.urandom(32)
+        key_hex = key.hex()
+        if not keyring_backend.store_secret("vault_fernet_key", key_hex):
             raise RuntimeError("Failed to store vault key in OS keyring")
 
-        f = Fernet(key)
-        (DATA_DIR / VERIFY_FILE).write_bytes(f.encrypt(b"shroudbyte-vault"))
+        (DATA_DIR / VERIFY_FILE).write_bytes(
+            crypto.encrypt_aead(b"shroudbyte-vault", key)
+        )
 
-        self._fernet = f
+        self._key = key
+        self._fernet = None
+        self._is_modern = True
         self._entries = []
         self._unlocked = True
         self._save()
 
     def unlock_with_keyring(self) -> bool:
-        """Unlock the vault using the Fernet key stored in the OS keyring."""
+        """Unlock the vault using the key stored in the OS keyring."""
         from . import keyring_backend
 
         key_str = keyring_backend.get_secret("vault_fernet_key")
@@ -135,15 +205,63 @@ class PasswordVault:
         if not verify_path.exists():
             return False
 
-        f = Fernet(key_str.encode("ascii"))
+        verify_blob = verify_path.read_bytes()
+
+        # Detect format: old keyring stores base64 Fernet key (44 chars),
+        # new keyring stores hex AES key (64 chars).
+        if len(key_str) == 64:
+            return self._unlock_keyring_modern(key_str, verify_blob)
+        else:
+            return self._unlock_keyring_legacy(key_str, verify_blob)
+
+    def _unlock_keyring_modern(self, key_hex: str, verify_blob: bytes) -> bool:
+        """Unlock with a modern hex-encoded AES-256 key from the keyring."""
         try:
-            f.decrypt(verify_path.read_bytes())
-        except InvalidToken:
+            key = bytes.fromhex(key_hex)
+        except ValueError:
             return False
 
-        self._fernet = f
+        try:
+            crypto.decrypt_aead(verify_blob, key)
+        except Exception:
+            return False
+
+        self._key = key
+        self._fernet = None
+        self._is_modern = True
         self._unlocked = True
         self._load()
+        return True
+
+    def _unlock_keyring_legacy(self, key_str: str, verify_blob: bytes) -> bool:
+        """Unlock with a legacy Fernet key from the keyring, then auto-migrate."""
+        from . import keyring_backend
+
+        try:
+            f = Fernet(key_str.encode("ascii"))
+            f.decrypt(verify_blob)
+        except (InvalidToken, Exception):
+            return False
+
+        # Temporarily use Fernet to load existing entries
+        self._fernet = f
+        self._key = None
+        self._is_modern = False
+        self._unlocked = True
+        self._load()
+
+        # --- Auto-migrate to modern crypto ---
+        new_key = os.urandom(32)
+        key_hex = new_key.hex()
+        if keyring_backend.store_secret("vault_fernet_key", key_hex):
+            (DATA_DIR / VERIFY_FILE).write_bytes(
+                crypto.encrypt_aead(b"shroudbyte-vault", new_key)
+            )
+            self._key = new_key
+            self._fernet = None
+            self._is_modern = True
+            self._save()
+
         return True
 
     def is_keyring_setup(self) -> bool:
@@ -157,7 +275,7 @@ class PasswordVault:
     def migrate_to_keyring(self) -> bool:
         """Migrate an unlocked master-password vault to keyring-backed storage.
 
-        The vault must already be unlocked. Generates a new Fernet key,
+        The vault must already be unlocked. Generates a new AES-256 key,
         stores it in the keyring, re-encrypts everything, and removes
         the salt file.
         """
@@ -165,13 +283,17 @@ class PasswordVault:
             raise RuntimeError("Vault must be unlocked before migration")
         from . import keyring_backend
 
-        key = Fernet.generate_key()
-        if not keyring_backend.store_secret("vault_fernet_key", key.decode("ascii")):
+        key = os.urandom(32)
+        key_hex = key.hex()
+        if not keyring_backend.store_secret("vault_fernet_key", key_hex):
             return False
 
-        f = Fernet(key)
-        self._fernet = f
-        (DATA_DIR / VERIFY_FILE).write_bytes(f.encrypt(b"shroudbyte-vault"))
+        self._key = key
+        self._fernet = None
+        self._is_modern = True
+        (DATA_DIR / VERIFY_FILE).write_bytes(
+            crypto.encrypt_aead(b"shroudbyte-vault", key)
+        )
         self._save()
 
         # Salt is no longer needed
@@ -183,20 +305,23 @@ class PasswordVault:
     def migrate_to_master_password(self, master_password: str) -> bool:
         """Migrate an unlocked keyring-backed vault to master-password storage.
 
-        Re-encrypts with a PBKDF2-derived key and removes the keyring entry.
+        Re-encrypts with an Argon2id-derived key and removes the keyring entry.
         """
         if not self._unlocked:
             raise RuntimeError("Vault must be unlocked before migration")
         from . import keyring_backend
 
         _ensure_dir()
-        salt = os.urandom(16)
+        salt = os.urandom(32)
         (DATA_DIR / SALT_FILE).write_bytes(salt)
 
         key = _derive_key(master_password, salt)
-        f = Fernet(key)
-        self._fernet = f
-        (DATA_DIR / VERIFY_FILE).write_bytes(f.encrypt(b"shroudbyte-vault"))
+        self._key = key
+        self._fernet = None
+        self._is_modern = True
+        (DATA_DIR / VERIFY_FILE).write_bytes(
+            crypto.encrypt_aead(b"shroudbyte-vault", key)
+        )
         self._save()
 
         keyring_backend.delete_secret("vault_fernet_key")
@@ -272,21 +397,32 @@ class PasswordVault:
     # ------------------------------------------------------------------
 
     def _save(self):
-        if not self._fernet:
-            return
         _ensure_dir()
         data = json.dumps(self._entries).encode("utf-8")
-        encrypted = self._fernet.encrypt(data)
+        if self._is_modern and self._key:
+            encrypted = crypto.encrypt_aead(data, self._key)
+        elif self._fernet:
+            encrypted = self._fernet.encrypt(data)
+        else:
+            return
         (DATA_DIR / VAULT_FILE).write_bytes(encrypted)
 
     def _load(self):
         vault_path = DATA_DIR / VAULT_FILE
-        if not vault_path.exists() or not self._fernet:
+        if not vault_path.exists():
             self._entries = []
             return
+
+        encrypted = vault_path.read_bytes()
+
         try:
-            encrypted = vault_path.read_bytes()
-            data = self._fernet.decrypt(encrypted)
+            if self._is_modern and self._key:
+                data = crypto.decrypt_aead(encrypted, self._key)
+            elif self._fernet:
+                data = self._fernet.decrypt(encrypted)
+            else:
+                self._entries = []
+                return
             self._entries = json.loads(data.decode("utf-8"))
-        except (InvalidToken, json.JSONDecodeError):
+        except (InvalidToken, json.JSONDecodeError, ValueError, Exception):
             self._entries = []

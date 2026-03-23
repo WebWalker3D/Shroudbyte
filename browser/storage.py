@@ -17,20 +17,38 @@ def _ensure_dir():
 # Generic JSON helpers
 # ---------------------------------------------------------------------------
 
+_json_cache: dict = {}
+
+
 def _load_json(filename, default=None):
+    if filename in _json_cache:
+        return _json_cache[filename]
     _ensure_dir()
     path = DATA_DIR / filename
     if path.exists():
         with open(path, "r") as f:
-            return json.load(f)
-    return default if default is not None else []
+            data = json.load(f)
+        _json_cache[filename] = data
+        return data
+    result = default if default is not None else []
+    _json_cache[filename] = result
+    return result
 
 
 def _save_json(filename, data):
     _ensure_dir()
+    _json_cache[filename] = data
     path = DATA_DIR / filename
     with open(path, "w") as f:
-        json.dump(data, f, indent=2)
+        json.dump(data, f, separators=(',', ':'))
+
+
+def invalidate_cache(filename=None):
+    """Clear the in-memory JSON cache. If filename given, clear only that entry."""
+    if filename:
+        _json_cache.pop(filename, None)
+    else:
+        _json_cache.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -45,11 +63,14 @@ def save_bookmarks(bookmarks):
     _save_json("bookmarks.json", bookmarks)
 
 
-def add_bookmark(title, url):
+def add_bookmark(title, url, folder="", tags=None):
     bm = load_bookmarks()
     if any(b["url"] == url for b in bm):
-        return False
-    bm.append({"title": title, "url": url, "added": time.time()})
+        return False  # duplicate detection
+    bm.append({
+        "title": title, "url": url, "added": time.time(),
+        "folder": folder, "tags": tags or [],
+    })
     save_bookmarks(bm)
     return True
 
@@ -58,6 +79,40 @@ def remove_bookmark(url):
     bm = load_bookmarks()
     bm = [b for b in bm if b["url"] != url]
     save_bookmarks(bm)
+
+
+def update_bookmark(url, title=None, folder=None, tags=None):
+    """Update fields of an existing bookmark by URL."""
+    bm = load_bookmarks()
+    for b in bm:
+        if b["url"] == url:
+            if title is not None:
+                b["title"] = title
+            if folder is not None:
+                b["folder"] = folder
+            if tags is not None:
+                b["tags"] = tags
+            break
+    save_bookmarks(bm)
+
+
+def get_bookmark_folders() -> list[str]:
+    """Return sorted list of unique folder paths."""
+    folders = set()
+    for bm in load_bookmarks():
+        f = bm.get("folder", "")
+        if f:
+            folders.add(f)
+    return sorted(folders)
+
+
+def get_bookmark_tags() -> list[str]:
+    """Return sorted list of unique tags."""
+    tags = set()
+    for bm in load_bookmarks():
+        for t in bm.get("tags", []):
+            tags.add(t)
+    return sorted(tags)
 
 
 def is_bookmarked(url):
@@ -69,24 +124,18 @@ def is_bookmarked(url):
 # ---------------------------------------------------------------------------
 
 def load_history():
-    return _load_json("history.json", [])
-
-
-def save_history(history):
-    _save_json("history.json", history)
+    from .db import get_db
+    return get_db().load_history()
 
 
 def add_history_entry(title, url):
-    hist = load_history()
-    hist.insert(0, {"title": title, "url": url, "visited": time.time()})
-    # Keep the last 5000 entries
-    if len(hist) > 5000:
-        hist = hist[:5000]
-    save_history(hist)
+    from .db import get_db
+    get_db().add_history_entry(title, url)
 
 
 def clear_history():
-    save_history([])
+    from .db import get_db
+    get_db().clear_history()
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +172,7 @@ DEFAULT_SETTINGS = {
     "screen_time_tracking": False,
     "clipboard_history": True,
     "vault_auto_lock_minutes": 15,
+    "permission_ttl_days": 30,
 }
 
 
@@ -286,15 +336,35 @@ def save_permissions(permissions):
 def get_permission(host, feature):
     """Get stored permission for host+feature. Returns 'allow', 'deny', or None."""
     perms = load_permissions()
-    return perms.get(host, {}).get(feature)
+    entry = perms.get(host, {}).get(feature)
+    if entry is None:
+        return None
+    # Support both old format (bare string) and new format (dict)
+    if isinstance(entry, str):
+        return entry  # legacy, no expiry
+    expires = entry.get("expires_at", 0)
+    if expires > 0 and time.time() > expires:
+        # Expired — remove and re-prompt next time
+        remove_permission(host, feature)
+        return None
+    return entry.get("decision")
 
 
-def set_permission(host, feature, decision):
-    """Store a permission decision ('allow' or 'deny') for host+feature."""
+def set_permission(host, feature, decision, ttl_days=30):
+    """Store a permission decision ('allow' or 'deny') for host+feature.
+
+    If *ttl_days* > 0 the permission will automatically expire after the
+    given number of days.  A value of 0 means the permission never expires.
+    """
     perms = load_permissions()
     if host not in perms:
         perms[host] = {}
-    perms[host][feature] = decision
+    now = time.time()
+    perms[host][feature] = {
+        "decision": decision,
+        "granted_at": now,
+        "expires_at": now + (ttl_days * 86400) if ttl_days > 0 else 0,
+    }
     save_permissions(perms)
 
 
@@ -405,75 +475,37 @@ def update_watch(url, updates):
 # Scroll position memory
 # ---------------------------------------------------------------------------
 
-_scroll_cache: dict | None = None
-_SCROLL_MAX = 2000  # max URLs to remember
-
-
-def _load_scroll_data() -> dict:
-    global _scroll_cache
-    if _scroll_cache is None:
-        _scroll_cache = _load_json("scroll_positions.json", {})
-    return _scroll_cache
-
-
 def get_scroll_position(url: str) -> float:
     """Return saved scroll percentage (0.0–1.0) for a URL, or 0."""
-    return _load_scroll_data().get(url, 0.0)
+    from .db import get_db
+    return get_db().get_scroll_position(url)
 
 
 def set_scroll_position(url: str, position: float):
     """Save scroll percentage for a URL."""
-    data = _load_scroll_data()
-    if position < 0.01:
-        data.pop(url, None)
-    else:
-        data[url] = round(position, 4)
-    # Evict oldest if over limit
-    if len(data) > _SCROLL_MAX:
-        keys = list(data)[:len(data) - _SCROLL_MAX]
-        for k in keys:
-            del data[k]
-    _scroll_cache.update(data)
-    _save_json("scroll_positions.json", data)
+    from .db import get_db
+    get_db().set_scroll_position(url, position)
 
 
 # ---------------------------------------------------------------------------
 # Form draft auto-save
 # ---------------------------------------------------------------------------
 
-_DRAFT_MAX = 200
-
-
-def load_form_drafts() -> dict:
-    return _load_json("form_drafts.json", {})
-
-
 def get_form_draft(url: str) -> dict | None:
     """Return saved draft for a URL, or None."""
-    drafts = load_form_drafts()
-    return drafts.get(url)
+    from .db import get_db
+    return get_db().get_form_draft(url)
 
 
 def save_form_draft(url: str, fields: dict, timestamp: float | None = None):
     """Save form field values for a URL."""
-    drafts = load_form_drafts()
-    drafts[url] = {
-        "fields": fields,
-        "saved": timestamp or time.time(),
-    }
-    # Evict oldest if over limit
-    if len(drafts) > _DRAFT_MAX:
-        by_age = sorted(drafts.items(), key=lambda x: x[1].get("saved", 0))
-        for k, _ in by_age[:len(drafts) - _DRAFT_MAX]:
-            del drafts[k]
-    _save_json("form_drafts.json", drafts)
+    from .db import get_db
+    get_db().save_form_draft(url, fields, timestamp)
 
 
 def remove_form_draft(url: str):
-    drafts = load_form_drafts()
-    if url in drafts:
-        del drafts[url]
-        _save_json("form_drafts.json", drafts)
+    from .db import get_db
+    get_db().remove_form_draft(url)
 
 
 # ---------------------------------------------------------------------------
@@ -482,24 +514,19 @@ def remove_form_draft(url: str):
 
 def load_screen_time() -> dict:
     """Load screen time data. Returns {domain: {date_str: seconds}}."""
-    return _load_json("screen_time.json", {})
-
-
-def save_screen_time(data: dict):
-    _save_json("screen_time.json", data)
+    from .db import get_db
+    return get_db().load_screen_time()
 
 
 def add_screen_time(domain: str, date_str: str, seconds: int):
     """Add seconds to a domain's time for a given date."""
-    data = load_screen_time()
-    if domain not in data:
-        data[domain] = {}
-    data[domain][date_str] = data[domain].get(date_str, 0) + seconds
-    _save_json("screen_time.json", data)
+    from .db import get_db
+    get_db().add_screen_time(domain, date_str, seconds)
 
 
 def clear_screen_time():
-    _save_json("screen_time.json", {})
+    from .db import get_db
+    get_db().clear_screen_time()
 
 
 # ---------------------------------------------------------------------------
@@ -600,25 +627,5 @@ def get_url_suggestions(limit=500):
     Merges history and bookmarks.  Returns a list of
     ``(url, title, frequency)`` tuples, most-visited first, capped at *limit*.
     """
-    freq = {}   # url -> visit count
-    titles = {} # url -> most recent title
-
-    for entry in load_history():
-        url = entry.get("url", "")
-        if not url or url.startswith("shroud:"):
-            continue
-        freq[url] = freq.get(url, 0) + 1
-        if url not in titles:
-            titles[url] = entry.get("title", "")
-
-    for bm in load_bookmarks():
-        url = bm.get("url", "")
-        if not url:
-            continue
-        freq.setdefault(url, 0)
-        if url not in titles or not titles[url]:
-            titles[url] = bm.get("title", "")
-
-    suggestions = [(url, titles.get(url, ""), count) for url, count in freq.items()]
-    suggestions.sort(key=lambda t: t[2], reverse=True)
-    return suggestions[:limit]
+    from .db import get_db
+    return get_db().get_url_suggestions(limit)

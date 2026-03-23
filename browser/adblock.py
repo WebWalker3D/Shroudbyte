@@ -7,6 +7,7 @@ from PyQt6.QtWebEngineCore import QWebEngineUrlRequestInterceptor
 
 from . import storage
 from . import filterlists
+from .adblock_engine import AdBlockEngine
 
 # Hardcoded fallback domains (used even when no filter lists are downloaded)
 DEFAULT_BLOCKED = {
@@ -166,6 +167,9 @@ class PageTracker:
         self.stripped_params: set[str] = set()
 
 
+_PAGE_DATA_MAX = 100
+
+
 class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -177,6 +181,7 @@ class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
         self._http_auth = {}  # host -> b"Basic base64(user:pass)"
         self._page_data: dict[str, PageTracker] = {}
         self._site_exceptions: dict[str, dict[str, str]] = {}
+        self._engine = AdBlockEngine()
         self.reload_hosts()
 
     def set_http_auth(self, host, user, password):
@@ -211,7 +216,7 @@ class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
 
     @property
     def total_rules(self):
-        return len(self._blocked_hosts)
+        return len(self._blocked_hosts) + self._engine.rule_count
 
     def reset_count(self):
         self._blocked_count = 0
@@ -238,6 +243,11 @@ class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
         if tracker is None:
             tracker = PageTracker()
             self._page_data[fp_host] = tracker
+            # LRU eviction: drop oldest entries when over the limit
+            if len(self._page_data) > _PAGE_DATA_MAX:
+                excess = len(self._page_data) - _PAGE_DATA_MAX
+                for key in list(self._page_data)[:excess]:
+                    del self._page_data[key]
         return tracker
 
     @staticmethod
@@ -334,6 +344,24 @@ class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
 
         # Check if the host or any parent domain is blocked
         if self._match_blocked(req_host):
+            if is_3p and fp_host:
+                tracker = self._ensure_page_data(fp_host)
+                tracker.blocked[req_host] = tracker.blocked.get(req_host, 0) + 1
+            info.block(True)
+            self._blocked_count += 1
+            return
+
+        # Enhanced ABP engine check (pattern rules, options, dynamic filters)
+        full_url = url.toString()
+        source = first_party.toString() if first_party.isValid() else ""
+        # Map Qt resource type to ABP resource type string
+        res_type = ""
+        rt = info.resourceType()
+        _RT_MAP = {2: "script", 3: "image", 4: "stylesheet",
+                   5: "font", 10: "xmlhttprequest", 7: "subdocument",
+                   12: "media", 15: "websocket"}
+        res_type = _RT_MAP.get(rt, "")
+        if self._engine.should_block(full_url, source, res_type):
             if is_3p and fp_host:
                 tracker = self._ensure_page_data(fp_host)
                 tracker.blocked[req_host] = tracker.blocked.get(req_host, 0) + 1

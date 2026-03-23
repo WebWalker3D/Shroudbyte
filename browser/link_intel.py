@@ -5,6 +5,7 @@ revealing the true destination, tracker domains, URL shorteners, and
 tracking parameters that would be stripped.
 """
 
+import concurrent.futures
 import http.client
 import ssl
 import threading
@@ -34,6 +35,7 @@ class LinkResolver:
         self._blocked = blocked_hosts or DEFAULT_BLOCKED
         self._cache: dict = {}
         self._lock = threading.Lock()
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
     def update_blocked_hosts(self, hosts):
         """Update the set of known tracker/ad domains."""
@@ -51,9 +53,7 @@ class LinkResolver:
                 callback(cached)
                 return
 
-        threading.Thread(
-            target=self._worker, args=(url, callback), daemon=True
-        ).start()
+        self._executor.submit(self._worker, url, callback)
 
     # ── internals ────────────────────────────────────────────────
 

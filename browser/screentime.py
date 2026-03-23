@@ -11,7 +11,7 @@ from PyQt6.QtCore import QObject, QTimer
 from . import storage
 
 
-_SAVE_INTERVAL = 30  # flush to disk every 30 seconds
+_SAVE_INTERVAL = 300  # flush to DB every 5 minutes
 
 
 class ScreenTimeTracker(QObject):
@@ -80,14 +80,11 @@ class ScreenTimeTracker(QObject):
         if not self._pending:
             return
         today = time.strftime("%Y-%m-%d")
-        data = storage.load_screen_time()
-        for domain, secs in self._pending.items():
-            if not domain:
-                continue
-            if domain not in data:
-                data[domain] = {}
-            data[domain][today] = data[domain].get(today, 0) + secs
-        storage.save_screen_time(data)
+        from .db import get_db
+        db = get_db()
+        clean = {d: s for d, s in self._pending.items() if d}
+        if clean:
+            db.add_screen_time_batch(clean, today)
         self._pending.clear()
 
     def get_today_domain_time(self, domain: str) -> int:

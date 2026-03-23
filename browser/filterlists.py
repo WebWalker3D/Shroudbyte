@@ -16,6 +16,8 @@ from .storage import DATA_DIR, _ensure_dir, _load_json, _save_json
 FILTERS_DIR = DATA_DIR / "filters"
 SETTINGS_FILE = "filter_settings.json"
 
+_ABP_DOMAIN_RE = re.compile(r'^\|\|([a-zA-Z0-9._-]+)\^(\$.*)?$')
+
 # --- Available filter lists ---------------------------------------------------
 
 FILTER_LISTS = [
@@ -203,7 +205,7 @@ def _parse_file(text: str) -> tuple[set, list]:
             continue
 
         # ABP domain block: ||domain^
-        m = re.match(r'^\|\|([a-zA-Z0-9._-]+)\^(\$.*)?$', line)
+        m = _ABP_DOMAIN_RE.match(line)
         if m:
             domain = m.group(1).lower()
             if "." in domain:
@@ -227,6 +229,7 @@ def _parse_file(text: str) -> tuple[set, list]:
 
 
 _parse_cache: dict[str, tuple[set, list]] = {}  # list_id -> (domains, cosmetic)
+_cosmetic_css_cache: str | None = None
 
 
 def _get_parsed(list_id: str) -> tuple[set, list]:
@@ -247,6 +250,8 @@ def _get_parsed(list_id: str) -> tuple[set, list]:
 
 def invalidate_parse_cache(list_id: str = ""):
     """Clear cached parse results. Call after downloading new lists."""
+    global _cosmetic_css_cache
+    _cosmetic_css_cache = None
     if list_id:
         _parse_cache.pop(list_id, None)
     else:
@@ -288,6 +293,9 @@ def get_cosmetic_rules() -> list:
 
 def get_cosmetic_css() -> str:
     """Return a CSS string that hides all cosmetic-filtered elements."""
+    global _cosmetic_css_cache
+    if _cosmetic_css_cache is not None:
+        return _cosmetic_css_cache
     rules = get_cosmetic_rules()
     if not rules:
         return ""
@@ -298,7 +306,34 @@ def get_cosmetic_css() -> str:
         batch = rules[i:i + batch_size]
         selector = ", ".join(batch)
         css_parts.append(f"{selector} {{ display: none !important; }}")
-    return "\n".join(css_parts)
+    _cosmetic_css_cache = "\n".join(css_parts)
+    return _cosmetic_css_cache
+
+
+def get_all_abp_lines() -> list[str]:
+    """Return raw ABP filter lines from all enabled, cached lists for the engine."""
+    settings = load_list_settings()
+    lines = []
+    for fl in FILTER_LISTS:
+        if not settings.get(fl["id"], False):
+            continue
+        path = get_cached_path(fl["id"])
+        if not path.exists():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for line in text.splitlines():
+                line = line.strip()
+                if not line or line.startswith(("!", "[")) or line.startswith(("0.0.0.0 ", "127.0.0.1 ")):
+                    continue
+                # Only include lines that look like ABP network/scriptlet rules
+                # (skip pure comment lines starting with # that aren't cosmetic)
+                if line.startswith('#'):
+                    continue
+                lines.append(line)
+        except Exception:
+            continue
+    return lines
 
 
 def get_total_domain_count() -> int:

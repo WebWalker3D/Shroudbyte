@@ -14,7 +14,7 @@ def get_annoyance_shield_js():
     window.__shroudAnnoyanceShield = true;
 
     // ── Config ──────────────────────────────────────────────────
-    var CHECK_INTERVAL = 2000;   // ms between scans
+    var CHECK_INTERVAL = 10000;  // ms between scans
     var Z_INDEX_THRESHOLD = 9000;
     var AREA_THRESHOLD = 0.3;    // overlay must cover >30% of viewport
 
@@ -137,10 +137,15 @@ def get_annoyance_shield_js():
         var vpArea = vpW * vpH;
         if (vpArea === 0) return;
 
-        // Find all fixed/sticky elements with high z-index
-        var all = document.querySelectorAll('*');
-        for (var i = 0; i < all.length; i++) {
-            var el = all[i];
+        // Find fixed/sticky elements with high z-index (targeted selectors)
+        var candidates = document.querySelectorAll(
+            '[style*="position: fixed"], [style*="position: sticky"], ' +
+            '[class*="modal"], [class*="overlay"], [class*="popup"], ' +
+            '[id*="modal"], [id*="overlay"], [id*="popup"], ' +
+            '[role="dialog"], [role="alertdialog"]'
+        );
+        for (var i = 0; i < candidates.length; i++) {
+            var el = candidates[i];
             var style = window.getComputedStyle(el);
             var pos = style.position;
             if (pos !== 'fixed' && pos !== 'sticky') continue;

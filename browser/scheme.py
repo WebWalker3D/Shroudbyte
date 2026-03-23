@@ -43,6 +43,12 @@ _PAGES = {
     "screentime": "Screen Time",
     "saved": "Saved Pages",
     "apps": "Installed Apps",
+    "permissions": "Permission Ledger",
+    "background": "Background Activity",
+    "captures": "Captures",
+    "extensions": "Extensions",
+    "profiles": "Profiles",
+    "sessions": "Sessions",
     "about": "About Shroudbyte",
     "shortcuts": "Keyboard Shortcuts",
 }
@@ -79,6 +85,18 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
             html = self._page_saved()
         elif host == "apps":
             html = self._page_apps()
+        elif host == "permissions":
+            html = self._page_permissions()
+        elif host == "background":
+            html = self._page_background()
+        elif host == "captures":
+            html = self._page_captures()
+        elif host == "extensions":
+            html = self._page_extensions()
+        elif host == "profiles":
+            html = self._page_profiles()
+        elif host == "sessions":
+            html = self._page_sessions()
         elif host == "savedview":
             html = self._page_saved_view(url)
         elif host == "about":
@@ -109,6 +127,12 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         ("screentime", "\u231A", "Screen Time"),
         ("saved", "\u2B73", "Saved Pages"),
         ("apps", "\u2B1A", "Apps"),
+        ("permissions", "\u2263", "Permissions"),
+        ("background", "\u2B6E", "Background"),
+        ("captures", "\u23fa", "Captures"),
+        ("extensions", "\u29C9", "Extensions"),
+        ("profiles", "\u2B50", "Profiles"),
+        ("sessions", "\u2630", "Sessions"),
         ("shortcuts", "\u2328", "Shortcuts"),
         ("about", "\u2139", "About"),
     ]
@@ -367,32 +391,271 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
     # ── Page generators ──────────────────────────────────────────
 
     def _page_bookmarks(self):
+        import json as _json
         bookmarks = storage.load_bookmarks()
-        rows = ""
+        folders = storage.get_bookmark_folders()
+        all_tags = storage.get_bookmark_tags()
+
+        # Build JSON data for JS-side rendering
+        bm_data = []
         for bm in bookmarks:
-            esc_url = html_mod.escape(bm.get("url", ""))
-            esc_title = html_mod.escape(bm.get("title", esc_url)[:80])
-            rows += (
-                f'<div class="entry">'
-                f'<a href="{esc_url}" class="entry-link">'
-                f'<div class="entry-title">{esc_title}</div>'
-                f'<div class="entry-url">{esc_url}</div></a>'
-                f'<button class="act-btn danger" '
-                f"onclick=\"pageAct('del_bookmark','{esc_url}')\">Delete</button>"
-                f'</div>'
-            )
-        if not bookmarks:
-            rows = '<div class="empty">No bookmarks yet. Press Ctrl+D to bookmark a page.</div>'
+            bm_data.append({
+                "title": bm.get("title", ""),
+                "url": bm.get("url", ""),
+                "folder": bm.get("folder", ""),
+                "tags": bm.get("tags", []),
+                "added": bm.get("added", 0),
+            })
+        bm_json = _json.dumps(bm_data)
+        folders_json = _json.dumps(folders)
+        tags_json = _json.dumps(all_tags)
+
+        extra_css = f"""
+    .bm-layout {{ display: flex; gap: 0; }}
+    .bm-sidebar {{
+      width: 180px; flex-shrink: 0;
+      border-right: 1px solid {BORDER}; padding: 8px 0;
+      max-height: 75vh; overflow-y: auto;
+    }}
+    .bm-folder {{
+      display: block; padding: 7px 16px; font-size: 12px;
+      color: {TEXT_DIM}; cursor: pointer; border: none;
+      background: transparent; text-align: left; width: 100%;
+      font-family: inherit; transition: all 0.12s;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }}
+    .bm-folder:hover {{ color: {TEXT}; background: {BG_HOVER}; }}
+    .bm-folder.active {{ color: {ACCENT}; background: rgba(205,141,106,0.08); }}
+    .bm-folder .folder-icon {{ margin-right: 6px; font-size: 11px; }}
+    .bm-content {{ flex: 1; min-width: 0; }}
+    .tag-bar {{
+      display: flex; flex-wrap: wrap; gap: 6px;
+      padding: 10px 16px; border-bottom: 1px solid {BORDER};
+    }}
+    .tag-pill {{
+      padding: 3px 10px; font-size: 11px; border-radius: 12px;
+      border: 1px solid {BORDER}; background: {BG_MID};
+      color: {TEXT_DIM}; cursor: pointer; font-family: inherit;
+      transition: all 0.12s;
+    }}
+    .tag-pill:hover {{ border-color: {ACCENT}; color: {TEXT}; }}
+    .tag-pill.active {{ background: {ACCENT}; color: {BG_DARK}; border-color: {ACCENT}; }}
+    .bm-list {{ padding: 4px 0; }}
+    .bm-entry {{
+      display: flex; align-items: center; padding: 10px 18px; gap: 12px;
+    }}
+    .bm-entry + .bm-entry {{ border-top: 1px solid {BORDER}; }}
+    .bm-meta {{ display: flex; gap: 6px; align-items: center; margin-top: 3px; flex-wrap: wrap; }}
+    .bm-meta-folder {{
+      font-size: 10px; color: {TEXT_FAINT};
+      background: {BG_MID}; padding: 1px 7px; border-radius: 4px;
+    }}
+    .bm-meta-tag {{
+      font-size: 10px; color: {ACCENT};
+      background: rgba(205,141,106,0.1); padding: 1px 7px; border-radius: 4px;
+    }}
+    /* Edit dialog */
+    .bm-overlay {{
+      display: none; position: fixed; inset: 0; z-index: 200;
+      background: rgba(0,0,0,0.6);
+      justify-content: center; align-items: center;
+    }}
+    .bm-overlay.visible {{ display: flex; }}
+    .bm-dialog {{
+      background: {BG_CARD}; border: 1px solid {BORDER};
+      border-radius: 14px; padding: 24px; width: 420px; max-width: 90vw;
+    }}
+    .bm-dialog h3 {{ font-size: 16px; margin-bottom: 16px; color: {TEXT}; }}
+    .bm-dialog label {{ display: block; font-size: 12px; color: {TEXT_DIM}; margin: 10px 0 4px; }}
+    .bm-dialog input[type="text"] {{ width: 100%; }}
+    .bm-dialog .dialog-btns {{ display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }}
+"""
 
         content = f"""
-    <div class="section-desc">{len(bookmarks)} saved</div>
-    <div class="card">{rows}</div>"""
+    <div class="section-desc"><span id="bmCount">{len(bookmarks)}</span> saved</div>
+    <input class="search" type="text" id="bmSearch" placeholder="Search bookmarks..."
+           oninput="filterBookmarks()">
+    <div class="card bm-layout">
+      <div class="bm-sidebar" id="folderSidebar"></div>
+      <div class="bm-content">
+        <div class="tag-bar" id="tagBar"></div>
+        <div class="bm-list" id="bmList"></div>
+      </div>
+    </div>
 
-        return self._wrap("Bookmarks", "bookmarks", content, extra_js="""
-    function pageAct(action, arg) {
-      console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify({action:action,arg:arg}));
-      setTimeout(function(){ location.reload(); }, 200);
-    }""")
+    <!-- Edit dialog -->
+    <div class="bm-overlay" id="editOverlay" onclick="if(event.target===this)closeEdit()">
+      <div class="bm-dialog">
+        <h3>Edit Bookmark</h3>
+        <input type="hidden" id="editUrl">
+        <label>Title</label>
+        <input type="text" id="editTitle">
+        <label>Folder</label>
+        <input type="text" id="editFolder" placeholder="e.g. Work / Research" list="folderList">
+        <datalist id="folderList"></datalist>
+        <label>Tags (comma-separated)</label>
+        <input type="text" id="editTags" placeholder="e.g. news, tech, reference">
+        <div class="dialog-btns">
+          <button class="act-btn" onclick="closeEdit()">Cancel</button>
+          <button class="act-btn visit" onclick="saveEdit()">Save</button>
+        </div>
+      </div>
+    </div>"""
+
+        extra_js = f"""
+    var _bookmarks = {bm_json};
+    var _folders = {folders_json};
+    var _allTags = {tags_json};
+    var _activeFolder = null;
+    var _activeTag = null;
+
+    function esc(s) {{ var d = document.createElement('span'); d.textContent = s; return d.innerHTML; }}
+
+    function buildFolderSidebar() {{
+      var sb = document.getElementById('folderSidebar');
+      var h = '<button class="bm-folder active" onclick="selectFolder(null,this)">' +
+              '<span class="folder-icon">\\u2606</span>All Bookmarks</button>';
+      for (var i = 0; i < _folders.length; i++) {{
+        h += '<button class="bm-folder" onclick="selectFolder(\\'' +
+             esc(_folders[i]).replace(/'/g, "\\\\'") + '\\',this)">' +
+             '<span class="folder-icon">\\ud83d\\udcc1</span>' + esc(_folders[i]) + '</button>';
+      }}
+      sb.innerHTML = h;
+    }}
+
+    function buildTagBar() {{
+      var tb = document.getElementById('tagBar');
+      if (!_allTags.length) {{ tb.style.display = 'none'; return; }}
+      var h = '';
+      for (var i = 0; i < _allTags.length; i++) {{
+        h += '<button class="tag-pill" onclick="selectTag(\\'' +
+             esc(_allTags[i]).replace(/'/g, "\\\\'") + '\\',this)">' +
+             esc(_allTags[i]) + '</button>';
+      }}
+      tb.innerHTML = h;
+    }}
+
+    function selectFolder(name, el) {{
+      _activeFolder = name;
+      document.querySelectorAll('.bm-folder').forEach(function(b) {{ b.classList.remove('active'); }});
+      if (el) el.classList.add('active');
+      filterBookmarks();
+    }}
+
+    function selectTag(name, el) {{
+      if (_activeTag === name) {{
+        _activeTag = null;
+        el.classList.remove('active');
+      }} else {{
+        _activeTag = name;
+        document.querySelectorAll('.tag-pill').forEach(function(b) {{ b.classList.remove('active'); }});
+        el.classList.add('active');
+      }}
+      filterBookmarks();
+    }}
+
+    function filterBookmarks() {{
+      var q = (document.getElementById('bmSearch').value || '').toLowerCase();
+      var filtered = _bookmarks.filter(function(bm) {{
+        if (_activeFolder !== null && (bm.folder || '') !== _activeFolder) return false;
+        if (_activeTag && (!bm.tags || bm.tags.indexOf(_activeTag) === -1)) return false;
+        if (q) {{
+          var hay = (bm.title + ' ' + bm.url + ' ' + (bm.folder || '') + ' ' + (bm.tags || []).join(' ')).toLowerCase();
+          if (hay.indexOf(q) === -1) return false;
+        }}
+        return true;
+      }});
+      renderBookmarks(filtered);
+    }}
+
+    function renderBookmarks(items) {{
+      var el = document.getElementById('bmList');
+      document.getElementById('bmCount').textContent = items.length;
+      if (!items.length) {{
+        el.innerHTML = '<div class="empty">No bookmarks match the current filters.</div>';
+        return;
+      }}
+      var h = '';
+      for (var i = 0; i < items.length; i++) {{
+        var bm = items[i];
+        var u = esc(bm.url);
+        var t = esc((bm.title || bm.url).substring(0, 80));
+
+        // Metadata badges
+        var meta = '';
+        if (bm.folder) meta += '<span class="bm-meta-folder">' + esc(bm.folder) + '</span>';
+        if (bm.tags && bm.tags.length) {{
+          for (var j = 0; j < bm.tags.length; j++) {{
+            meta += '<span class="bm-meta-tag">' + esc(bm.tags[j]) + '</span>';
+          }}
+        }}
+        var metaHtml = meta ? '<div class="bm-meta">' + meta + '</div>' : '';
+
+        h += '<div class="bm-entry">' +
+          '<a href="' + u + '" class="entry-link" style="flex:1;min-width:0;text-decoration:none;">' +
+          '<div class="entry-title">' + t + '</div>' +
+          '<div class="entry-url">' + u + '</div>' +
+          metaHtml + '</a>' +
+          '<button class="act-btn" onclick="openEdit(\\'' +
+            u.replace(/'/g, "\\\\'") + '\\')">Edit</button>' +
+          '<button class="act-btn danger" onclick="pageAct(\\'del_bookmark\\',\\'' +
+            u.replace(/'/g, "\\\\'") + '\\')">Delete</button>' +
+          '</div>';
+      }}
+      el.innerHTML = h;
+    }}
+
+    function pageAct(action, arg) {{
+      console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify({{action:action,arg:arg}}));
+      setTimeout(function(){{ location.reload(); }}, 200);
+    }}
+
+    function openEdit(url) {{
+      var bm = null;
+      for (var i = 0; i < _bookmarks.length; i++) {{
+        if (_bookmarks[i].url === url) {{ bm = _bookmarks[i]; break; }}
+      }}
+      if (!bm) return;
+      document.getElementById('editUrl').value = bm.url;
+      document.getElementById('editTitle').value = bm.title || '';
+      document.getElementById('editFolder').value = bm.folder || '';
+      document.getElementById('editTags').value = (bm.tags || []).join(', ');
+      // Populate datalist with existing folders
+      var dl = document.getElementById('folderList');
+      dl.innerHTML = '';
+      for (var i = 0; i < _folders.length; i++) {{
+        var opt = document.createElement('option');
+        opt.value = _folders[i];
+        dl.appendChild(opt);
+      }}
+      document.getElementById('editOverlay').classList.add('visible');
+    }}
+
+    function closeEdit() {{
+      document.getElementById('editOverlay').classList.remove('visible');
+    }}
+
+    function saveEdit() {{
+      var url = document.getElementById('editUrl').value;
+      var title = document.getElementById('editTitle').value;
+      var folder = document.getElementById('editFolder').value.trim();
+      var tagsRaw = document.getElementById('editTags').value;
+      var tags = tagsRaw ? tagsRaw.split(',').map(function(t){{ return t.trim(); }}).filter(Boolean) : [];
+      console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify({{
+        action: 'edit_bookmark', arg: url,
+        title: title, folder: folder, tags: tags
+      }}));
+      closeEdit();
+      setTimeout(function(){{ location.reload(); }}, 200);
+    }}
+
+    buildFolderSidebar();
+    buildTagBar();
+    filterBookmarks();
+"""
+
+        return self._wrap("Bookmarks", "bookmarks", content,
+                          extra_css=extra_css, extra_js=extra_js)
 
     def _page_history(self):
         import time as _time
@@ -894,6 +1157,18 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
       </div>
 
       <div class="section">
+        <div class="section-title">Permissions</div>
+        <div class="row">
+          <div class="row-label">Permission auto-expire
+            <div class="row-hint">Days until granted site permissions expire and re-prompt (0 = never)</div>
+          </div>
+          <input type="number" id="permission_ttl_days" min="0" max="3650"
+            value="{settings.get('permission_ttl_days', 30)}"
+            style="width:80px;flex:none">&nbsp;days
+        </div>
+      </div>
+
+      <div class="section">
         <div class="section-title">Page Watches</div>
         <div class="row">
           <div class="row-label">Default check interval
@@ -1015,6 +1290,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         strip_tracking: getVal('strip_tracking'),
         fingerprint_resistance: getVal('fingerprint_resistance'),
         link_intelligence: getVal('link_intelligence'),
+        permission_ttl_days: getVal('permission_ttl_days'),
         page_watch_interval: getVal('page_watch_interval') * 60,
         auto_delete_cookies: getVal('auto_delete_cookies'),
         form_draft_autosave: getVal('form_draft_autosave'),
@@ -1661,7 +1937,12 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         all_perms = storage.load_permissions()
         perm_rows = ""
         for host, features in sorted(all_perms.items()):
-            for feat, decision in sorted(features.items()):
+            for feat, entry in sorted(features.items()):
+                # Support both old format (bare string) and new format (dict)
+                if isinstance(entry, dict):
+                    decision = entry.get("decision", "allow")
+                else:
+                    decision = entry
                 color = "green" if decision == "allow" else "red"
                 esc_host = html_mod.escape(host)
                 esc_feat = html_mod.escape(feat)
@@ -1838,6 +2119,465 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         return self._wrap("Privacy Dashboard", "privacy", content,
                           extra_css=extra_css, extra_js=extra_js)
 
+    def _page_permissions(self):
+        """Generate the shroud://permissions audit-log page."""
+        from . import permission_ledger
+        import time as _time
+
+        entries = permission_ledger.get_usage(limit=500)
+        anomalies = permission_ledger.get_anomalies(threshold=10, hours=1)
+
+        # Build anomaly badges
+        anomaly_set: set[tuple[str, str]] = set()
+        for a in anomalies:
+            anomaly_set.add((a["host"], a["feature"]))
+
+        # Stat cards
+        total_events = len(entries)
+        unique_hosts = len({e["host"] for e in entries})
+        grants = sum(1 for e in entries if e["action"] == "grant")
+        denies = sum(1 for e in entries if e["action"] == "deny")
+
+        # Group entries by host
+        by_host: dict[str, list[dict]] = {}
+        for e in entries:
+            by_host.setdefault(e["host"], []).append(e)
+
+        # Build host sections
+        host_cards = ""
+        for host in sorted(by_host.keys()):
+            host_entries = by_host[host]
+            esc_host = html_mod.escape(host)
+            rows = ""
+            for e in host_entries:
+                ts = _time.strftime("%Y-%m-%d %H:%M:%S",
+                                    _time.localtime(e["timestamp"]))
+                esc_feat = html_mod.escape(e["feature"])
+                action = html_mod.escape(e["action"])
+                color = "green" if action == "grant" else "red"
+                anomaly_badge = ""
+                if (e["host"], e["feature"]) in anomaly_set:
+                    anomaly_badge = (
+                        f' <span class="anomaly-badge">high frequency</span>'
+                    )
+                rows += (
+                    f'<tr>'
+                    f'<td class="ts">{ts}</td>'
+                    f'<td class="perm-feat">{esc_feat}{anomaly_badge}</td>'
+                    f'<td class="dot-cell"><span class="dot {color}"></span></td>'
+                    f'<td class="perm-dec">{action}</td>'
+                    f'</tr>'
+                )
+
+            host_cards += f"""
+        <div class="site-card host-group" data-host="{esc_host}">
+          <div class="site-header">
+            <span class="site-name">{esc_host}</span>
+            <span class="site-stats">{len(host_entries)} events</span>
+          </div>
+          <table class="req-table">{rows}</table>
+        </div>"""
+
+        if not host_cards:
+            host_cards = (
+                '<div class="empty">No permission events recorded yet. '
+                'Grant or deny site permissions to see them here.</div>'
+            )
+
+        content = f"""
+    <div class="stat-row" style="grid-template-columns: repeat(4, 1fr);">
+      <div class="stat-card">
+        <div class="stat-num events">{total_events}</div>
+        <div class="stat-label">Total Events</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num hosts">{unique_hosts}</div>
+        <div class="stat-label">Sites</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num granted">{grants}</div>
+        <div class="stat-label">Granted</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num denied">{denies}</div>
+        <div class="stat-label">Denied</div>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <input type="text" id="hostFilter" placeholder="Filter by host..."
+             oninput="filterHosts(this.value)">
+      <button class="act-btn export-btn" onclick="permAct('export')">Export CSV</button>
+    </div>
+
+    <div class="section" id="hostList">
+      <h2>Permission Events by Host</h2>
+      {host_cards}
+    </div>
+
+    <div class="reload-banner" id="reloadBanner">
+      Done. <button onclick="location.reload()">Refresh</button>
+    </div>"""
+
+        extra_css = f"""
+  .stat-num.events {{ color: {ACCENT}; }}
+  .stat-num.hosts {{ color: {YELLOW}; }}
+  .stat-num.granted {{ color: {GREEN}; }}
+  .stat-num.denied {{ color: {RED}; }}
+  .section h2 {{
+    font-size: 11px; text-transform: uppercase;
+    letter-spacing: 3px; color: {TEXT_FAINT};
+    font-weight: 600; margin-bottom: 10px; padding-left: 4px;
+  }}
+  .toolbar {{
+    display: flex; gap: 10px; align-items: center;
+    margin-bottom: 16px;
+  }}
+  .toolbar input {{
+    flex: 1; padding: 8px 14px; font-size: 13px;
+    background: {BG_CARD}; color: {TEXT};
+    border: 1px solid {BORDER}; border-radius: 8px;
+    outline: none; font-family: inherit;
+  }}
+  .toolbar input:focus {{
+    border-color: {ACCENT};
+  }}
+  .export-btn {{
+    white-space: nowrap;
+  }}
+  .site-card {{
+    width: 100%; background: {BG_CARD};
+    border: 1px solid {BORDER}; border-radius: 12px;
+    padding: 14px 18px; margin-bottom: 10px;
+  }}
+  .site-header {{
+    display: flex; justify-content: space-between;
+    align-items: center; margin-bottom: 8px;
+  }}
+  .site-name {{
+    font-size: 14px; font-weight: 600; color: {TEXT};
+  }}
+  .site-stats {{
+    font-size: 11px; color: {TEXT_FAINT};
+  }}
+  .req-table {{ width: 100%; border-collapse: collapse; }}
+  .req-table td {{ padding: 5px 0; font-size: 12px; }}
+  .req-table td.dot-cell {{ width: 18px; }}
+  .req-table td.ts {{
+    color: {TEXT_FAINT};
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 11px; width: 160px;
+  }}
+  .req-table td.perm-feat {{
+    color: {TEXT_DIM}; font-family: monospace; font-size: 11px;
+  }}
+  .req-table td.perm-dec {{
+    text-align: right; font-size: 11px;
+  }}
+  .req-table tr + tr td {{ border-top: 1px solid {BORDER}; }}
+  .anomaly-badge {{
+    display: inline-block;
+    padding: 1px 6px; border-radius: 4px;
+    font-size: 9px; font-weight: 600;
+    background: rgba(229, 115, 115, 0.15);
+    color: {RED}; border: 1px solid rgba(229, 115, 115, 0.3);
+    margin-left: 6px; vertical-align: middle;
+  }}
+  .act-cell {{ text-align: right; width: 80px; }}
+  .reload-banner {{
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: {BG_CARD}; border-top: 1px solid {ACCENT};
+    padding: 10px 24px; text-align: center;
+    font-size: 13px; color: {ACCENT_TEXT}; z-index: 100;
+    display: none;
+  }}
+  .reload-banner button {{
+    margin-left: 12px; padding: 5px 16px; font-size: 12px;
+    border: none; border-radius: 6px;
+    background: {ACCENT}; color: {BG_DARK};
+    cursor: pointer; font-weight: 600; font-family: inherit;
+  }}
+  .reload-banner button:hover {{ background: {ACCENT_HOVER}; }}"""
+
+        extra_js = """
+    function filterHosts(text) {
+      var cards = document.querySelectorAll('.host-group');
+      var t = text.toLowerCase();
+      for (var i = 0; i < cards.length; i++) {
+        var host = cards[i].getAttribute('data-host') || '';
+        cards[i].style.display = (!t || host.toLowerCase().indexOf(t) !== -1)
+          ? '' : 'none';
+      }
+    }
+    function permAct(action) {
+      console.log('__SHROUD_PERM_LEDGER__:' + JSON.stringify({
+        action: action
+      }));
+      document.getElementById('reloadBanner').style.display = 'block';
+    }"""
+
+        return self._wrap("Permission Ledger", "permissions", content,
+                          extra_css=extra_css, extra_js=extra_js)
+
+    def _page_background(self):
+        """Generate the shroud://background activity dashboard."""
+        import time as _time
+
+        mw = self.parent()
+        bg = getattr(mw, "_bg_activity", None)
+
+        workers = bg.get_all_workers() if bg else {}
+        subs = bg.get_all_subscriptions() if bg else {}
+
+        num_workers = len(workers)
+        num_paused = sum(1 for w in workers.values() if w.get("paused"))
+        num_active = num_workers - num_paused
+        num_subs = len(subs)
+
+        def _ago(ts):
+            if not ts:
+                return "unknown"
+            d = _time.time() - ts
+            if d < 60:
+                return f"{int(d)}s ago"
+            if d < 3600:
+                return f"{int(d / 60)}m ago"
+            if d < 86400:
+                return f"{int(d / 3600)}h ago"
+            return f"{int(d / 86400)}d ago"
+
+        # Summary stats
+        content = f"""
+    <div class="stat-row">
+      <div class="stat-card">
+        <div class="stat-num">{num_workers}</div>
+        <div class="stat-label">Service Workers</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">{num_active}</div>
+        <div class="stat-label">Active</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">{num_paused}</div>
+        <div class="stat-label">Paused</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">{num_subs}</div>
+        <div class="stat-label">Push Subscriptions</div>
+      </div>
+    </div>"""
+
+        # Service workers section
+        if workers:
+            worker_rows = ""
+            for host, info in sorted(workers.items()):
+                esc_host = html_mod.escape(host)
+                esc_scope = html_mod.escape(info.get("scope", "/"))
+                paused = info.get("paused", False)
+                status_dot = "yellow" if paused else "green"
+                status_text = "Paused" if paused else "Active"
+                reg_ago = _ago(info.get("registered_at"))
+                toggle_label = "Resume" if paused else "Pause"
+                toggle_action = "resume_worker" if paused else "pause_worker"
+
+                worker_rows += (
+                    f'<div class="entry">'
+                    f'<span class="dot {status_dot}"></span>'
+                    f'<div style="flex:1;min-width:0;">'
+                    f'<div class="entry-title">{esc_host}</div>'
+                    f'<div class="entry-url">Scope: {esc_scope}</div>'
+                    f'</div>'
+                    f'<span class="entry-date">Registered {reg_ago}</span>'
+                    f'<span style="font-size:11px;color:{TEXT_DIM};">{status_text}</span>'
+                    f'<button class="act-btn" '
+                    f'onclick="bgAct(\'{toggle_action}\',\'{esc_host}\')">{toggle_label}</button>'
+                    f'<button class="act-btn danger" '
+                    f'onclick="bgAct(\'unregister_worker\',\'{esc_host}\')">Unregister</button>'
+                    f'</div>'
+                )
+        else:
+            worker_rows = (
+                '<div class="empty">No service workers detected. '
+                'Service workers will appear here when sites register them.</div>'
+            )
+
+        content += f"""
+    <div class="section">
+      <div class="section-title">Service Workers</div>
+      <div class="section-desc">{num_workers} registered worker{'s' if num_workers != 1 else ''}</div>
+      <div class="card">{worker_rows}</div>
+    </div>"""
+
+        # Push subscriptions section
+        if subs:
+            sub_rows = ""
+            for host, info in sorted(subs.items()):
+                esc_host = html_mod.escape(host)
+                endpoint = info.get("endpoint", "")
+                # Truncate long endpoints for display
+                if len(endpoint) > 80:
+                    display_endpoint = html_mod.escape(endpoint[:77]) + "..."
+                else:
+                    display_endpoint = html_mod.escape(endpoint)
+                sub_ago = _ago(info.get("subscribed_at"))
+
+                sub_rows += (
+                    f'<div class="entry">'
+                    f'<span class="dot green"></span>'
+                    f'<div style="flex:1;min-width:0;">'
+                    f'<div class="entry-title">{esc_host}</div>'
+                    f'<div class="entry-url">{display_endpoint}</div>'
+                    f'</div>'
+                    f'<span class="entry-date">Subscribed {sub_ago}</span>'
+                    f'<button class="act-btn danger" '
+                    f'onclick="bgAct(\'revoke_push\',\'{esc_host}\')">Revoke</button>'
+                    f'</div>'
+                )
+        else:
+            sub_rows = (
+                '<div class="empty">No push subscriptions detected. '
+                'Subscriptions will appear here when sites request push notifications.</div>'
+            )
+
+        content += f"""
+    <div class="section">
+      <div class="section-title">Push Subscriptions</div>
+      <div class="section-desc">{num_subs} active subscription{'s' if num_subs != 1 else ''}</div>
+      <div class="card">{sub_rows}</div>
+    </div>"""
+
+        extra_js = """
+    function bgAct(action, host) {
+      console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify({action:action,arg:host}));
+      setTimeout(function(){ location.reload(); }, 300);
+    }"""
+
+        return self._wrap("Background Activity", "background", content,
+                          extra_js=extra_js)
+
+    def _page_captures(self):
+        """Generate the shroud://captures page showing WARC capture status."""
+        import time as _time
+
+        # Access the WarcCapture instance from the main window
+        mw = self.parent()
+        warc = getattr(mw, '_warc_capture', None)
+
+        is_active = warc.is_active if warc else False
+        record_count = warc.record_count if warc else 0
+        page_count = warc.page_count if warc else 0
+        captured_urls = warc.captured_urls if warc else []
+
+        status_color = GREEN if is_active else TEXT_FAINT
+        status_text = "Recording" if is_active else "Inactive"
+        status_icon = "\u23f9" if is_active else "\u23fa"
+
+        # Citation info
+        citation = warc.get_citation() if warc and record_count > 0 else None
+        citation_html = ""
+        if citation:
+            esc_url = html_mod.escape(citation.get("url", ""))
+            esc_sha = html_mod.escape(citation.get("archive_sha256", ""))
+            esc_time = html_mod.escape(citation.get("captured_at", ""))
+            citation_html = f"""
+    <div class="section">
+      <div class="section-title">Citation</div>
+      <div class="card card-padded">
+        <div class="row">
+          <span class="row-label">Start URL</span>
+          <code style="font-size:11px;color:{ACCENT};word-break:break-all;">{esc_url}</code>
+        </div>
+        <div class="row">
+          <span class="row-label">Captured At</span>
+          <span style="font-size:12px;color:{TEXT_DIM};">{esc_time}</span>
+        </div>
+        <div class="row">
+          <span class="row-label">Archive SHA-256</span>
+          <code style="font-size:10px;color:{TEXT_DIM};word-break:break-all;">{esc_sha}</code>
+        </div>
+        <div class="row">
+          <span class="row-label">Pages</span>
+          <span style="font-size:12px;color:{TEXT_DIM};">{citation.get("page_count", 0)}</span>
+        </div>
+      </div>
+    </div>"""
+
+        # Captured URLs list
+        url_rows = ""
+        for entry in captured_urls:
+            esc_title = html_mod.escape(entry.get("title", "")[:70])
+            esc_url = html_mod.escape(entry.get("url", ""))
+            esc_ts = html_mod.escape(entry.get("timestamp", ""))
+            url_rows += (
+                f'<div class="entry">'
+                f'<a href="{esc_url}" class="entry-link" style="flex:1;min-width:0;">'
+                f'<div class="entry-title">{esc_title or esc_url}</div>'
+                f'<div class="entry-url">{esc_url}</div></a>'
+                f'<span class="entry-date">{esc_ts}</span>'
+                f'</div>'
+            )
+        if not captured_urls:
+            url_rows = (
+                '<div class="empty">No pages captured yet. '
+                'Start a capture and browse to record pages.</div>'
+            )
+
+        # Action buttons
+        action_btns = ""
+        if record_count > 0:
+            action_btns = f"""
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="btn btn-primary" onclick="pageAct('save_wacz','')">Save as WACZ</button>
+      <button class="btn btn-secondary" onclick="pageAct('save_warc','')">Save as WARC</button>
+      <button class="btn btn-secondary" style="border-color:{RED};color:{RED};"
+              onclick="if(confirm('Clear all capture data?')){{pageAct('clear_capture','');setTimeout(function(){{location.reload();}},300);}}">
+        Clear Capture</button>
+    </div>"""
+
+        content = f"""
+    <div class="stat-row">
+      <div class="stat-card">
+        <div class="stat-num" style="color:{status_color};">{status_icon}</div>
+        <div class="stat-label">{status_text}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">{record_count}</div>
+        <div class="stat-label">Records</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">{page_count}</div>
+        <div class="stat-label">Pages</div>
+      </div>
+    </div>
+
+    {action_btns}
+
+    <div class="section" style="margin-top:24px;">
+      <div class="section-title">Captured Pages</div>
+      <div class="card">{url_rows}</div>
+    </div>
+
+    {citation_html}
+
+    <div class="section">
+      <div class="section-title">About WARC/WACZ</div>
+      <div class="section-desc">
+        WARC (Web ARChive) is an ISO 28500 standard for recording web content.
+        WACZ (Web Archive Collection Zipped) bundles WARC data with metadata
+        for easy sharing and replay. Start a capture session using the toolbar
+        button or the Tools menu, then browse normally. Every page you visit
+        will be recorded. Stop the capture when done and save your archive.
+      </div>
+    </div>"""
+
+        extra_js = """
+    function pageAct(action, arg) {
+      console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify({action:action,arg:arg}));
+      setTimeout(function(){ location.reload(); }, 300);
+    }"""
+
+        return self._wrap("Captures", "captures", content, extra_js=extra_js)
+
     def _page_about(self):
         from PyQt6.QtCore import PYQT_VERSION_STR, qVersion
 
@@ -1942,6 +2682,528 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
 
         return self._wrap("About Shroudbyte", "about", content,
                           extra_css=extra_css)
+
+    def _page_extensions(self):
+        """Generate the shroud://extensions management page."""
+        from .extensions import ExtensionManager
+
+        mgr = ExtensionManager()
+        extensions = mgr.get_extensions()
+
+        ext_dir = str(mgr._extensions_dir)
+        esc_dir = html_mod.escape(ext_dir)
+
+        cards = ""
+        for ext in extensions:
+            esc_name = html_mod.escape(ext.name)
+            esc_ver = html_mod.escape(ext.version)
+            esc_desc = html_mod.escape(ext.description) if ext.description else "<em>No description</em>"
+            dir_name = html_mod.escape(ext.path.name)
+            enabled_cls = "enabled" if ext.enabled else "disabled"
+            toggle_action = "disable_ext" if ext.enabled else "enable_ext"
+            toggle_label = "Disable" if ext.enabled else "Enable"
+            status_text = "Enabled" if ext.enabled else "Disabled"
+            status_color = "green" if ext.enabled else "dim"
+
+            # Summarise content scripts
+            scripts_info = ""
+            for i, cs in enumerate(ext.content_scripts):
+                patterns = ", ".join(cs.matches[:3])
+                if len(cs.matches) > 3:
+                    patterns += f" (+{len(cs.matches) - 3} more)"
+                js_count = len(cs.js)
+                css_count = len(cs.css)
+                scripts_info += (
+                    f'<div class="cs-info">'
+                    f'<span class="cs-matches">{html_mod.escape(patterns)}</span>'
+                    f' &mdash; {js_count} JS, {css_count} CSS'
+                    f' @ {html_mod.escape(cs.run_at)}'
+                    f'</div>'
+                )
+
+            cards += f"""
+    <div class="ext-card {enabled_cls}">
+      <div class="ext-header">
+        <div class="ext-title">{esc_name}
+          <span class="ext-version">v{esc_ver}</span>
+        </div>
+        <span class="ext-status {status_color}">{status_text}</span>
+      </div>
+      <div class="ext-desc">{esc_desc}</div>
+      {scripts_info if scripts_info else ''}
+      <div class="ext-path">
+        <code>{dir_name}/</code>
+      </div>
+      <div class="ext-actions">
+        <button class="btn btn-sm"
+          onclick="extAct('{toggle_action}','{dir_name}')">{toggle_label}</button>
+      </div>
+    </div>"""
+
+        if not extensions:
+            cards = (
+                '<div class="empty-state">'
+                '<div class="empty-icon">\u29C9</div>'
+                '<div class="empty-title">No Extensions Installed</div>'
+                '<div class="empty-desc">'
+                'Create a directory inside the extensions folder with a '
+                '<code>manifest.json</code> file to get started.'
+                '</div>'
+                '</div>'
+            )
+
+        content = f"""
+    <div class="section-desc">
+      Content script extensions inject JavaScript and CSS into web pages.
+      Each extension is a folder with a <code>manifest.json</code> inside the extensions directory.
+    </div>
+
+    <div class="info-bar">
+      <div class="info-label">Extensions directory</div>
+      <code class="info-path">{esc_dir}</code>
+    </div>
+
+    <div class="toolbar">
+      <button class="btn btn-primary" onclick="extAct('reload_extensions','')">
+        Reload Extensions</button>
+      <span class="ext-count">{len(extensions)} extension{"s" if len(extensions) != 1 else ""}</span>
+    </div>
+
+    <div class="ext-list">{cards}</div>
+
+    <div class="section" style="margin-top:36px;">
+      <div class="section-title">How to Install Extensions</div>
+      <div class="instructions card card-padded">
+        <ol>
+          <li>Create a directory inside <code>{esc_dir}/</code></li>
+          <li>Add a <code>manifest.json</code> file with this format:
+<pre>{{
+  "name": "My Extension",
+  "version": "1.0",
+  "description": "What it does",
+  "content_scripts": [{{
+    "matches": ["*://*.example.com/*"],
+    "js": ["content.js"],
+    "css": ["style.css"],
+    "run_at": "document_idle"
+  }}]
+}}</pre>
+          </li>
+          <li>Add your <code>.js</code> and <code>.css</code> files in the same directory</li>
+          <li>Click <strong>Reload Extensions</strong> above</li>
+        </ol>
+        <div class="instructions-note">
+          <strong>Match patterns:</strong> Use <code>&lt;all_urls&gt;</code> to match every page,
+          or <code>*://*.example.com/*</code> for specific sites.
+          <code>run_at</code> can be <code>document_start</code>, <code>document_end</code>,
+          or <code>document_idle</code> (default).
+        </div>
+      </div>
+    </div>"""
+
+        extra_css = f"""
+  .section-desc {{
+    color: {TEXT_DIM}; font-size: 13px; margin-bottom: 20px; line-height: 1.6;
+  }}
+  .section-desc code {{
+    background: {BG_CARD}; padding: 2px 6px; border-radius: 4px;
+    font-size: 12px; color: {ACCENT};
+  }}
+  .info-bar {{
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 18px; margin-bottom: 20px;
+    background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 10px;
+  }}
+  .info-label {{
+    font-size: 11px; font-weight: 600; color: {TEXT_FAINT};
+    text-transform: uppercase; letter-spacing: 1px; flex-shrink: 0;
+  }}
+  .info-path {{
+    font-size: 12px; color: {TEXT_DIM};
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    word-break: break-all;
+  }}
+  .toolbar {{
+    display: flex; align-items: center; gap: 12px; margin-bottom: 20px;
+  }}
+  .ext-count {{
+    font-size: 12px; color: {TEXT_FAINT};
+  }}
+  .ext-list {{ display: flex; flex-direction: column; gap: 12px; }}
+  .ext-card {{
+    background: {BG_CARD}; border: 1px solid {BORDER};
+    border-radius: 12px; padding: 18px 22px;
+    transition: border-color 0.2s;
+  }}
+  .ext-card:hover {{ border-color: {ACCENT}33; }}
+  .ext-card.disabled {{ opacity: 0.6; }}
+  .ext-header {{
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 6px;
+  }}
+  .ext-title {{
+    font-size: 15px; font-weight: 600; color: {TEXT};
+  }}
+  .ext-version {{
+    font-size: 11px; font-weight: 400; color: {TEXT_FAINT}; margin-left: 8px;
+  }}
+  .ext-status {{
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+    font-weight: 600; padding: 3px 8px; border-radius: 6px;
+  }}
+  .ext-status.green {{ color: {GREEN}; background: {GREEN}15; }}
+  .ext-status.dim {{ color: {TEXT_FAINT}; background: {BG_HOVER}; }}
+  .ext-desc {{
+    font-size: 13px; color: {TEXT_DIM}; margin-bottom: 8px; line-height: 1.5;
+  }}
+  .ext-desc em {{ color: {TEXT_FAINT}; }}
+  .cs-info {{
+    font-size: 11px; color: {TEXT_FAINT}; margin-bottom: 4px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  }}
+  .cs-matches {{ color: {ACCENT}; }}
+  .ext-path {{
+    font-size: 11px; color: {TEXT_FAINT}; margin-top: 6px;
+  }}
+  .ext-path code {{
+    background: {BG_DARK}; padding: 2px 6px; border-radius: 4px;
+    font-size: 11px;
+  }}
+  .ext-actions {{
+    display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px;
+  }}
+  .btn {{
+    padding: 8px 16px; font-size: 13px; font-weight: 500;
+    border: 1px solid {BORDER}; border-radius: 8px;
+    cursor: pointer; background: {BG_DARK}; color: {TEXT};
+    transition: all 0.15s;
+  }}
+  .btn:hover {{ background: {BG_HOVER}; }}
+  .btn-sm {{ padding: 6px 12px; font-size: 12px; }}
+  .btn-primary {{
+    background: {ACCENT}; color: {BG_DARK};
+    border-color: {ACCENT}; font-weight: 600;
+  }}
+  .btn-primary:hover {{ background: {ACCENT_HOVER}; }}
+  .empty-state {{
+    text-align: center; padding: 48px 24px;
+    background: {BG_CARD}; border: 1px solid {BORDER};
+    border-radius: 12px;
+  }}
+  .empty-icon {{ font-size: 48px; color: {TEXT_FAINT}; margin-bottom: 16px; }}
+  .empty-title {{ font-size: 16px; font-weight: 600; color: {TEXT}; margin-bottom: 8px; }}
+  .empty-desc {{
+    font-size: 13px; color: {TEXT_DIM}; line-height: 1.6;
+  }}
+  .empty-desc code {{
+    background: {BG_DARK}; padding: 2px 6px; border-radius: 4px;
+    font-size: 12px; color: {ACCENT};
+  }}
+  .instructions {{
+    font-size: 13px; color: {TEXT_DIM}; line-height: 1.8;
+    padding: 20px 24px !important;
+  }}
+  .instructions ol {{ padding-left: 20px; }}
+  .instructions li {{ margin-bottom: 12px; }}
+  .instructions code {{
+    background: {BG_DARK}; padding: 2px 6px; border-radius: 4px;
+    font-size: 12px; color: {ACCENT};
+  }}
+  .instructions pre {{
+    background: {BG_DARK}; padding: 14px 18px; border-radius: 8px;
+    font-size: 12px; color: {TEXT}; margin: 8px 0;
+    overflow-x: auto; white-space: pre;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    border: 1px solid {BORDER};
+  }}
+  .instructions-note {{
+    margin-top: 16px; padding: 12px 16px;
+    background: {BG_DARK}; border-radius: 8px;
+    font-size: 12px; color: {TEXT_FAINT}; line-height: 1.6;
+    border: 1px solid {BORDER};
+  }}
+  .instructions-note code {{
+    background: {BG_CARD};
+  }}"""
+
+        extra_js = """
+    function extAct(action, arg) {
+      console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify({action: action, arg: arg}));
+      setTimeout(function() { location.reload(); }, 300);
+    }"""
+
+        return self._wrap("Extensions", "extensions", content,
+                          extra_css=extra_css, extra_js=extra_js)
+
+    def _page_profiles(self):
+        """Generate the shroud://profiles container management page."""
+        from .profiles import ProfileManager, _DEFAULT_PROFILES
+
+        profiles_data = storage._load_json("profiles.json", None)
+        if profiles_data is None:
+            profiles_data = _DEFAULT_PROFILES
+
+        # ── build profile cards ──
+        cards = ""
+        for p in profiles_data:
+            name = p.get("name", "")
+            color = p.get("color", "#6366f1")
+            auto_assign = p.get("auto_assign", [])
+            esc_name = html_mod.escape(name)
+            esc_color = html_mod.escape(color)
+            domains_str = ", ".join(auto_assign) if auto_assign else ""
+            esc_domains = html_mod.escape(domains_str)
+            is_default = name == "Default"
+
+            delete_btn = ""
+            if not is_default:
+                delete_btn = (
+                    f'<button class="btn btn-danger" '
+                    f"onclick=\"profileAct('remove_profile','{esc_name}')\">"
+                    f'Delete</button>'
+                )
+
+            cards += f"""
+    <div class="profile-card">
+      <div class="profile-header">
+        <span class="color-swatch" style="background:{esc_color}"></span>
+        <span class="profile-name">{esc_name}</span>
+        {f'<span class="badge">default</span>' if is_default else ''}
+      </div>
+      <div class="profile-body">
+        <label class="field-label">Color</label>
+        <div class="color-row">
+          <input type="color" value="{esc_color}" class="color-input"
+            id="color-{esc_name}"
+            onchange="profileAct('update_profile','{esc_name}',
+              JSON.stringify({{color:this.value}}))">
+          <span class="color-hex">{esc_color}</span>
+        </div>
+        <label class="field-label">Auto-assign domains
+          <span class="hint">(comma-separated, e.g. github.com, gitlab.com)</span>
+        </label>
+        <div class="domain-row">
+          <input type="text" class="domain-input" value="{esc_domains}"
+            id="domains-{esc_name}" placeholder="No auto-assign rules">
+          <button class="btn btn-sm"
+            onclick="saveDomains('{esc_name}')">Save</button>
+        </div>
+      </div>
+      <div class="profile-actions">
+        {delete_btn}
+      </div>
+    </div>"""
+
+        content = f"""
+    <div class="section-desc">
+      Container profiles isolate cookies, storage, and cache.
+      Each profile uses a separate browser engine profile.
+    </div>
+
+    <div class="add-form">
+      <input type="text" id="new-name" class="add-input"
+        placeholder="New profile name">
+      <input type="color" id="new-color" value="#6366f1" class="color-input">
+      <button class="btn btn-primary" onclick="addProfile()">
+        Add Profile</button>
+    </div>
+
+    <div class="profile-list">{cards}</div>"""
+
+        extra_css = f"""
+  .section-desc {{
+    color: {TEXT_DIM}; font-size: 13px; margin-bottom: 24px;
+    line-height: 1.6;
+  }}
+  .add-form {{
+    display: flex; gap: 10px; align-items: center;
+    margin-bottom: 32px; padding: 16px 20px;
+    background: {BG_CARD}; border: 1px solid {BORDER};
+    border-radius: 12px;
+  }}
+  .add-input {{
+    flex: 1; padding: 10px 14px; font-size: 14px;
+    background: {BG_DARK}; color: {TEXT};
+    border: 1px solid {BORDER}; border-radius: 8px;
+    outline: none;
+  }}
+  .add-input:focus {{ border-color: {ACCENT}; }}
+  .color-input {{
+    width: 40px; height: 36px; border: none;
+    border-radius: 8px; cursor: pointer;
+    background: transparent; padding: 0;
+  }}
+  .profile-list {{ display: flex; flex-direction: column; gap: 16px; }}
+  .profile-card {{
+    background: {BG_CARD}; border: 1px solid {BORDER};
+    border-radius: 12px; padding: 20px 24px;
+    transition: border-color 0.2s;
+  }}
+  .profile-card:hover {{ border-color: {ACCENT}33; }}
+  .profile-header {{
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 16px;
+  }}
+  .color-swatch {{
+    width: 16px; height: 16px; border-radius: 50%;
+    flex-shrink: 0;
+  }}
+  .profile-name {{
+    font-size: 16px; font-weight: 600; color: {TEXT};
+  }}
+  .badge {{
+    font-size: 10px; text-transform: uppercase;
+    letter-spacing: 1px; color: {ACCENT};
+    background: {ACCENT}15; padding: 3px 8px;
+    border-radius: 6px; font-weight: 600;
+  }}
+  .profile-body {{ margin-bottom: 12px; }}
+  .field-label {{
+    display: block; font-size: 11px; font-weight: 600;
+    color: {TEXT_FAINT}; text-transform: uppercase;
+    letter-spacing: 1px; margin-bottom: 6px; margin-top: 12px;
+  }}
+  .field-label .hint {{
+    font-weight: 400; text-transform: none;
+    letter-spacing: 0; color: {TEXT_FAINT};
+    font-size: 11px;
+  }}
+  .color-row {{
+    display: flex; align-items: center; gap: 10px;
+  }}
+  .color-hex {{
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 12px; color: {TEXT_DIM};
+  }}
+  .domain-row {{
+    display: flex; gap: 8px; align-items: center;
+  }}
+  .domain-input {{
+    flex: 1; padding: 8px 12px; font-size: 13px;
+    background: {BG_DARK}; color: {TEXT};
+    border: 1px solid {BORDER}; border-radius: 8px;
+    outline: none;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  }}
+  .domain-input:focus {{ border-color: {ACCENT}; }}
+  .profile-actions {{
+    display: flex; gap: 8px; justify-content: flex-end;
+  }}
+  .btn {{
+    padding: 8px 16px; font-size: 13px; font-weight: 500;
+    border: 1px solid {BORDER}; border-radius: 8px;
+    cursor: pointer; background: {BG_DARK}; color: {TEXT};
+    transition: all 0.15s;
+  }}
+  .btn:hover {{ background: {BG_HOVER}; }}
+  .btn-sm {{ padding: 6px 12px; font-size: 12px; }}
+  .btn-primary {{
+    background: {ACCENT}; color: {BG_DARK};
+    border-color: {ACCENT}; font-weight: 600;
+  }}
+  .btn-primary:hover {{ background: {ACCENT_HOVER}; }}
+  .btn-danger {{
+    color: {RED}; border-color: {RED}44;
+  }}
+  .btn-danger:hover {{
+    background: {RED}22; border-color: {RED};
+  }}"""
+
+        extra_js = """
+    function profileAct(action, arg, extra) {
+      var payload = {action: action, arg: arg || ''};
+      if (extra) {
+        try { Object.assign(payload, JSON.parse(extra)); } catch(e) {}
+      }
+      console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify(payload));
+      setTimeout(function() { location.reload(); }, 250);
+    }
+
+    function addProfile() {
+      var name = document.getElementById('new-name').value.trim();
+      var color = document.getElementById('new-color').value;
+      if (!name) { alert('Please enter a profile name.'); return; }
+      profileAct('add_profile', name, JSON.stringify({color: color}));
+    }
+
+    function saveDomains(name) {
+      var input = document.getElementById('domains-' + name);
+      var domains = input.value.split(',').map(function(d) {
+        return d.trim();
+      }).filter(function(d) { return d.length > 0; });
+      profileAct('update_profile', name,
+        JSON.stringify({auto_assign: domains}));
+    }"""
+
+        return self._wrap("Profiles", "profiles", content,
+                          extra_css=extra_css, extra_js=extra_js)
+
+    def _page_sessions(self):
+        """Generate the shroud://sessions named session management page."""
+        import time as _time
+        from . import session_manager
+
+        sessions = session_manager.list_sessions()
+
+        def _ago(ts):
+            if not ts:
+                return "never"
+            d = _time.time() - ts
+            if d < 60: return "just now"
+            if d < 3600: return f"{int(d/60)}m ago"
+            if d < 86400: return f"{int(d/3600)}h ago"
+            return f"{int(d/86400)}d ago"
+
+        rows = ""
+        for s in sessions:
+            esc_name = html_mod.escape(s["name"])
+            ago = _ago(s["updated_at"])
+            tab_count = s["tab_count"]
+            rows += (
+                f'<div class="entry" style="gap:10px;">'
+                f'<div style="flex:1;min-width:0;">'
+                f'<div class="entry-title">{esc_name}</div>'
+                f'<div class="entry-url">{tab_count} tab{"s" if tab_count != 1 else ""}'
+                f' &middot; updated {ago}</div></div>'
+                f'<button class="act-btn visit" '
+                f'onclick="pageAct(\'load_session\',\'{esc_name}\')">Load</button>'
+                f'<button class="act-btn danger" '
+                f'onclick="pageAct(\'delete_session\',\'{esc_name}\')">Delete</button>'
+                f'</div>'
+            )
+
+        if not sessions:
+            rows = (
+                '<div class="empty">No saved sessions yet. '
+                'Use the form above to save your current tabs as a named session.</div>'
+            )
+
+        content = f"""
+    <div class="card" style="padding:16px;margin-bottom:16px;">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px;">Save Current Session</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input id="session-name" type="text" placeholder="Session name\u2026"
+          style="flex:1;padding:8px 12px;border-radius:8px;border:1px solid {BORDER};
+          background:{BG_DARK};color:{TEXT};font-size:13px;font-family:inherit;"
+          onkeydown="if(event.key==='Enter')saveSession()">
+        <button class="act-btn visit" onclick="saveSession()"
+          style="padding:8px 20px;">Save</button>
+      </div>
+    </div>
+    <div class="section-desc">{len(sessions)} saved session{"s" if len(sessions) != 1 else ""}</div>
+    <div class="card">{rows}</div>"""
+
+        return self._wrap("Sessions", "sessions", content, extra_js="""
+    function pageAct(action, arg) {
+      console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify({action:action,arg:arg}));
+      setTimeout(function(){ location.reload(); }, 300);
+    }
+    function saveSession() {
+      var name = document.getElementById('session-name').value.trim();
+      if (!name) return;
+      console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify({action:'save_session',arg:name}));
+      setTimeout(function(){ location.reload(); }, 300);
+    }""")
 
     def _page_shortcuts(self):
         categories = [

@@ -24,6 +24,9 @@ _PAGE_ACT_PREFIX = "__SHROUD_PAGE_ACT__:"
 _FORM_DRAFT_PREFIX = "__SHROUD_FORM_DRAFT__:"
 _CLIP_PREFIX = "__SHROUD_CLIP__:"
 _PWA_PREFIX = "__SHROUD_PWA__:"
+_SW_REGISTER_PREFIX = "__SHROUD_SW_REGISTER__:"
+_PUSH_SUB_PREFIX = "__SHROUD_PUSH_SUB__:"
+_PERM_LEDGER_PREFIX = "__SHROUD_PERM_LEDGER__:"
 
 # Shared set of hosts known NOT to require HTTP auth.
 # Populated on successful HEAD checks; avoids repeat probes.
@@ -119,6 +122,16 @@ class ShroudPage(QWebEnginePage):
             except Exception:
                 pass
             return
+        if message.startswith(_PERM_LEDGER_PREFIX):
+            try:
+                import json as _json
+                data = _json.loads(message[len(_PERM_LEDGER_PREFIX):])
+                mw = self._get_main_window()
+                if mw and hasattr(mw, "_handle_perm_ledger_action"):
+                    mw._handle_perm_ledger_action(data)
+            except Exception:
+                pass
+            return
         if message.startswith(_FORM_DRAFT_PREFIX):
             try:
                 import json as _json
@@ -144,6 +157,28 @@ class ShroudPage(QWebEnginePage):
                 mw = self._get_main_window()
                 if mw and hasattr(mw, "_handle_pwa"):
                     mw._handle_pwa(data)
+            except Exception:
+                pass
+            return
+        if message.startswith(_SW_REGISTER_PREFIX):
+            try:
+                import json as _json
+                data = _json.loads(message[len(_SW_REGISTER_PREFIX):])
+                mw = self._get_main_window()
+                if mw and hasattr(mw, "_bg_activity"):
+                    mw._bg_activity.register_service_worker(
+                        data.get("host", ""), data.get("scope", ""))
+            except Exception:
+                pass
+            return
+        if message.startswith(_PUSH_SUB_PREFIX):
+            try:
+                import json as _json
+                data = _json.loads(message[len(_PUSH_SUB_PREFIX):])
+                mw = self._get_main_window()
+                if mw and hasattr(mw, "_bg_activity"):
+                    mw._bg_activity.register_push_subscription(
+                        data.get("host", ""), data.get("endpoint", ""))
             except Exception:
                 pass
             return

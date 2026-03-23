@@ -141,12 +141,14 @@ class PageWatcher(QObject):
                 updates["change_count"] = watch.get("change_count", 0) + 1
 
             storage.update_watch(watch["url"], updates)
-            self._watches = storage.load_watches()
 
-            if changed:
+            # Update watches in-place instead of reloading from storage
+            with self._lock:
                 for w in self._watches:
                     if w["url"] == watch["url"]:
-                        self.page_changed.emit(dict(w))
+                        w.update(updates)
+                        if changed:
+                            self.page_changed.emit(dict(w))
                         break
         except Exception:
             # Network errors, timeouts, encoding issues — all expected

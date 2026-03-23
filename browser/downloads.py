@@ -2,9 +2,10 @@
 
 import os
 import subprocess
+import threading
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -19,6 +20,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtWebEngineCore import QWebEngineDownloadRequest
 
 from . import style
+from .download_verify import compute_hashes, verify_hash, verify_sigstore
 
 # File extensions that could execute code
 _DANGEROUS_EXTENSIONS = frozenset({
@@ -116,10 +118,31 @@ class DownloadItem(QWidget):
         self._open_btn.setVisible(False)
         self._open_btn.clicked.connect(self._open_file)
 
+        self._verify_btn = QPushButton("\u2714")
+        self._verify_btn.setToolTip("Verify download (compute hashes, check signatures)")
+        self._verify_btn.setStyleSheet(
+            f"QPushButton {{ border: none; border-radius: 6px;"
+            f" background: {style.BG_HOVER}; color: {style.TEXT_DIM};"
+            f" font-size: 11px; font-weight: 600;"
+            f" padding: 4px 10px; }}"
+            f"QPushButton:hover {{ background: {style.ACCENT}; color: {style.BG_DARK}; }}"
+        )
+        self._verify_btn.setVisible(False)
+        self._verify_btn.clicked.connect(self._verify_file)
+
+        # Verification status indicator
+        self._verify_label = QLabel()
+        self._verify_label.setStyleSheet(
+            f"font-size: 10px; color: {style.TEXT_FAINT}; border: none; background: transparent;"
+        )
+        self._verify_label.setVisible(False)
+
         layout.addLayout(info, 1)
         layout.addWidget(self._progress)
         layout.addWidget(self._pause_btn)
         layout.addWidget(self._cancel_btn)
+        layout.addWidget(self._verify_btn)
+        layout.addWidget(self._verify_label)
         layout.addWidget(self._open_btn)
 
         # Warn if file type is potentially dangerous
@@ -164,6 +187,9 @@ class DownloadItem(QWidget):
             self._pause_btn.setVisible(False)
             self._cancel_btn.setVisible(False)
             self._open_btn.setVisible(True)
+            self._verify_btn.setVisible(True)
+            # Auto-verify: check for .sha256 / .sig files alongside the download
+            QTimer.singleShot(200, self._auto_verify)
         elif state == QWebEngineDownloadRequest.DownloadState.DownloadCancelled:
             self._progress.setVisible(False)
             self._status_label.setText("Cancelled")
@@ -194,6 +220,111 @@ class DownloadItem(QWidget):
 
     def _cancel(self):
         self._download.cancel()
+
+    def _get_download_path(self) -> str:
+        return self._download.downloadDirectory() + "/" + self._download.downloadFileName()
+
+    def _auto_verify(self):
+        """Auto-verify if a .sha256 or .sig file exists alongside the download."""
+        path = Path(self._get_download_path())
+        if not path.exists():
+            return
+
+        # Check for .sha256 sidecar file
+        sha256_file = Path(str(path) + ".sha256")
+        if sha256_file.exists():
+            try:
+                expected = sha256_file.read_text().strip().split()[0]
+                self._run_verify_in_thread("hash", expected)
+                return
+            except Exception:
+                pass
+
+        # Check for sigstore bundle
+        for ext in [".sig", ".bundle", ".cosign.bundle"]:
+            sig_path = Path(str(path) + ext)
+            if sig_path.exists():
+                self._run_verify_in_thread("sigstore", str(sig_path))
+                return
+
+        # No sidecar found: compute and display hashes silently
+        self._run_verify_in_thread("hashes_only", "")
+
+    def _verify_file(self):
+        """User-triggered verification: compute hashes and show them."""
+        path = Path(self._get_download_path())
+        if not path.exists():
+            self._verify_label.setText("File not found")
+            self._verify_label.setVisible(True)
+            return
+
+        self._verify_btn.setEnabled(False)
+        self._verify_btn.setText("\u231B")
+        self._run_verify_in_thread("hashes_only", "")
+
+    def _run_verify_in_thread(self, mode, arg):
+        """Run verification in a background thread to avoid blocking the UI."""
+        path_str = self._get_download_path()
+
+        def _worker():
+            if mode == "hash":
+                result = verify_hash(path_str, arg, "sha256")
+                QTimer.singleShot(0, lambda: self._show_verify_result(result))
+            elif mode == "sigstore":
+                result = verify_sigstore(path_str, arg if arg else None)
+                QTimer.singleShot(0, lambda: self._show_verify_result(result))
+            else:
+                hashes = compute_hashes(path_str)
+                QTimer.singleShot(0, lambda: self._show_hashes(hashes))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _show_verify_result(self, result):
+        """Display verification result in the UI."""
+        self._verify_btn.setEnabled(True)
+        self._verify_btn.setText("\u2714")
+        self._verify_label.setVisible(True)
+
+        if result.verified:
+            self._verify_label.setText(f"\u2705 {result.details}")
+            self._verify_label.setStyleSheet(
+                f"font-size: 10px; color: {style.GREEN}; border: none; background: transparent;"
+            )
+            self._verify_label.setToolTip(
+                f"SHA-256: {result.sha256}\n"
+                f"Method: {result.method}\n"
+                f"Signer: {result.signer}" if result.signer else
+                f"SHA-256: {result.sha256}\nMethod: {result.method}"
+            )
+        else:
+            self._verify_label.setText(f"\u274C {result.details}")
+            self._verify_label.setStyleSheet(
+                f"font-size: 10px; color: {style.RED}; border: none; background: transparent;"
+            )
+            self._verify_label.setToolTip(f"SHA-256: {result.sha256}")
+
+    def _show_hashes(self, hashes):
+        """Display computed hashes (no pass/fail judgment)."""
+        self._verify_btn.setEnabled(True)
+        self._verify_btn.setText("\u2714")
+        self._verify_label.setVisible(True)
+
+        if hashes:
+            short = hashes.get("sha256", "")[:12]
+            self._verify_label.setText(f"SHA-256: {short}\u2026")
+            self._verify_label.setStyleSheet(
+                f"font-size: 10px; color: {style.TEXT_DIM}; border: none; background: transparent;"
+            )
+            self._verify_label.setToolTip(
+                f"SHA-256: {hashes.get('sha256', '')}\n"
+                f"SHA-512: {hashes.get('sha512', '')}\n"
+                f"MD5: {hashes.get('md5', '')}"
+            )
+        else:
+            self._verify_label.setText("Could not compute hashes")
+            self._verify_label.setStyleSheet(
+                f"font-size: 10px; color: {style.TEXT_FAINT}; border: none; background: transparent;"
+            )
 
     def _open_file(self):
         path = self._download.downloadDirectory() + "/" + self._download.downloadFileName()

@@ -1,0 +1,136 @@
+import json
+
+from PyQt6.QtCore import QUrl
+
+from browser import storage
+
+
+class SettingsMixin:
+    """Settings dialog helpers — mixed into BrowserWindow."""
+
+    # ------------------------------------------------------------------
+    # Settings dialog
+    # ------------------------------------------------------------------
+
+    def _show_settings(self):
+        """Open settings in a browser tab."""
+        view = self._current_view()
+        if view:
+            view.load(QUrl("shroud://settings"))
+        else:
+            self.add_new_tab(QUrl("shroud://settings"))
+
+    def _handle_settings_action(self, data, view=None):
+        """Process actions from the shroud://settings page."""
+        action = data.get("action", "")
+
+        if action == "save":
+            s = data.get("settings", {})
+            for key in (
+                "search_engine", "enable_javascript", "enable_adblock",
+                "default_zoom", "user_agent", "https_only", "do_not_track",
+                "restore_session", "strip_tracking", "fingerprint_resistance",
+                "link_intelligence", "page_watch_interval", "auto_delete_cookies",
+                "form_draft_autosave", "annoyance_shield",
+                "remember_scroll_position", "screen_time_tracking",
+                "clipboard_history",
+                "dns_over_https", "dns_over_https_provider", "custom_dns_fallback",
+            ):
+                if key in s:
+                    self._settings[key] = s[key]
+
+            storage.save_settings(self._settings)
+            self._apply_settings_runtime()
+            self._status.showMessage("Settings saved", 2000)
+            return
+
+        if action == "register":
+            server_url = data.get("server_url", "").strip()
+            if not server_url:
+                self._settings_page_result(view, error="Enter a server URL first.")
+                return
+            base = server_url.rstrip("/")
+            for suffix in ("/shroud-dns-query", "/shroud-dns-register", "/health"):
+                if base.endswith(suffix):
+                    base = base[:-len(suffix)]
+                    break
+            try:
+                import http.client, ssl as _ssl, urllib.parse
+                parsed = urllib.parse.urlparse(base)
+                # Registration connects to a user-specified server (likely self-signed
+                # pfSense cert). The server returns a cert fingerprint during
+                # registration, which is used for pinning on all subsequent requests.
+                ctx = _ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = _ssl.CERT_NONE
+                conn = http.client.HTTPSConnection(
+                    parsed.hostname, parsed.port or 443, context=ctx, timeout=10)
+                conn.connect()
+                conn.request("GET", "/shroud-dns-register")
+                resp = conn.getresponse()
+                if resp.status != 200:
+                    raise RuntimeError(f"Server returned HTTP {resp.status}")
+                reg_data = json.loads(resp.read())
+                conn.close()
+                secret = reg_data["secret"]
+                fingerprint = reg_data.get("cert_fingerprint", "")
+                storage.save_dns_secrets(self._settings, secret, fingerprint)
+                self._settings["custom_dns_enabled"] = True
+                self._settings["custom_dns_server"] = base
+                storage.save_settings(self._settings)
+                self._restart_browser()
+            except Exception as exc:
+                self._settings_page_result(view, error=f"Registration failed: {exc}")
+            return
+
+        if action == "unregister":
+            storage.clear_dns_secrets(self._settings)
+            self._settings["custom_dns_enabled"] = False
+            self._settings["custom_dns_server"] = ""
+            storage.save_settings(self._settings)
+            self._restart_browser()
+            return
+
+    def _settings_page_result(self, view, msg=None, error=None):
+        """Send a result message back to the settings page."""
+        if not view or not view.page():
+            return
+        result = {}
+        if msg:
+            result["msg"] = msg
+        if error:
+            result["error"] = error
+        view.page().runJavaScript(
+            f"window.__shroudSettingsResult&&window.__shroudSettingsResult({json.dumps(result)})"
+        )
+
+    def _apply_settings_runtime(self):
+        """Apply saved settings to running browser state."""
+        # Update DNS proxy if running
+        if self._dns_proxy is not None:
+            _base = self._settings["custom_dns_server"].rstrip("/")
+            secret = storage.get_dns_secret(self._settings)
+            fingerprint = storage.get_dns_cert_fingerprint(self._settings)
+            self._dns_proxy.update_config(
+                pfsense_url=_base + "/shroud-dns-query" if _base else "",
+                shared_secret=secret,
+                fallback=self._settings["custom_dns_fallback"],
+                cert_fingerprint=fingerprint,
+            )
+
+        self._apply_profile_settings()
+        self._adblocker.enabled = self._settings["enable_adblock"]
+        self._adblocker.strip_tracking = self._settings["strip_tracking"]
+        self._update_adblock_label()
+
+        # Apply HTTPS-only to all open tabs
+        for i in range(self._tabs.count()):
+            v = self._tabs.widget(i)
+            if v and hasattr(v.page(), "https_only"):
+                v.page().https_only = self._settings["https_only"]
+
+        self._adblocker.do_not_track = self._settings["do_not_track"]
+        self._screen_time.set_enabled(self._settings.get("screen_time_tracking", False))
+        self._clipboard_history.set_enabled(
+            self._settings.get("clipboard_history", True) and not self._private_mode
+        )

@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shroudbyte"
+version = "1.0.0"
+description = "A privacy-focused web browser built on QtWebEngine"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+authors = [
+    {name = "WebWalker3D", email = "binarycomputersolutions@gmail.com"},
+]
+keywords = ["browser", "privacy", "qtwebengine", "pyqt6"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
+]
+dependencies = [
+    "PyQt6>=6.5.0",
+    "PyQt6-WebEngine>=6.5.0",
+    "cryptography>=41.0.0",
+    "argon2-cffi>=23.1.0",
+    "keyring>=24.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-qt>=4.2.0",
+]
+
+[project.scripts]
+shroudbyte = "browser.__main__:main"
+
+[project.gui-scripts]
+shroudbyte-gui = "browser.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["browser*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
