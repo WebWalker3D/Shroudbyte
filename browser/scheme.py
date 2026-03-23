@@ -40,6 +40,7 @@ _PAGES = {
     "privacy": "Privacy Dashboard",
     "watches": "Page Watches",
     "screentime": "Screen Time",
+    "saved": "Saved Pages",
     "about": "About Shroudbyte",
     "shortcuts": "Keyboard Shortcuts",
 }
@@ -72,6 +73,10 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
             html = self._page_watches()
         elif host == "screentime":
             html = self._page_screentime()
+        elif host == "saved":
+            html = self._page_saved()
+        elif host == "savedview":
+            html = self._page_saved_view(url)
         elif host == "about":
             html = self._page_about()
         elif host == "shortcuts":
@@ -98,6 +103,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         ("privacy", "\u26E8", "Privacy"),
         ("watches", "\u25CE", "Page Watches"),
         ("screentime", "\u231A", "Screen Time"),
+        ("saved", "\u2B73", "Saved Pages"),
         ("shortcuts", "\u2328", "Shortcuts"),
         ("about", "\u2139", "About"),
     ]
@@ -1195,6 +1201,104 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
     </div>"""
 
         return self._wrap("Screen Time", "screentime", content, extra_css=extra_css)
+
+    def _page_saved(self):
+        """Generate the shroud://saved offline reading list page."""
+        import time as _time
+        pages = storage.load_saved_pages()
+
+        def _ago(ts):
+            d = _time.time() - ts
+            if d < 60: return "just now"
+            if d < 3600: return f"{int(d/60)}m ago"
+            if d < 86400: return f"{int(d/3600)}h ago"
+            return f"{int(d/86400)}d ago"
+
+        def _size(b):
+            if b < 1024: return f"{b} B"
+            if b < 1048576: return f"{b//1024} KB"
+            return f"{b/1048576:.1f} MB"
+
+        rows = ""
+        for p in pages:
+            esc_id = html_mod.escape(p.get("id", ""))
+            esc_title = html_mod.escape(p.get("title", "")[:70])
+            esc_url = html_mod.escape(p.get("url", ""))
+            esc_preview = html_mod.escape(p.get("preview", "")[:120])
+            ago = _ago(p.get("saved", 0))
+            size = _size(p.get("size", 0))
+            rows += (
+                f'<div class="entry" style="flex-direction:column;align-items:stretch;gap:4px;">'
+                f'<div style="display:flex;align-items:center;gap:10px;">'
+                f'<a href="shroud://savedview?id={esc_id}" class="entry-link" style="flex:1;min-width:0;">'
+                f'<div class="entry-title">{esc_title}</div>'
+                f'<div class="entry-url">{esc_url}</div></a>'
+                f'<span style="font-size:10px;color:{TEXT_FAINT};flex-shrink:0;">{ago} &middot; {size}</span>'
+                f'<button class="act-btn visit" onclick="window.location.href=\'{esc_url}\'">Visit</button>'
+                f'<button class="act-btn danger" onclick="pageAct(\'del_saved\',\'{esc_id}\')">Delete</button>'
+                f'</div>'
+                f'<div style="font-size:11px;color:{TEXT_FAINT};overflow:hidden;'
+                f'text-overflow:ellipsis;white-space:nowrap;">{esc_preview}</div>'
+                f'</div>'
+            )
+
+        if not pages:
+            rows = (
+                '<div class="empty">No saved pages yet. '
+                'Press Ctrl+Shift+D to save any page for offline reading.</div>'
+            )
+
+        content = f"""
+    <div class="section-desc">{len(pages)} page{'s' if len(pages) != 1 else ''} saved</div>
+    <div class="card">{rows}</div>"""
+
+        return self._wrap("Saved Pages", "saved", content, extra_js="""
+    function pageAct(action, arg) {
+      console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify({action:action,arg:arg}));
+      setTimeout(function(){ location.reload(); }, 200);
+    }""")
+
+    def _page_saved_view(self, url):
+        """Render a saved page snapshot for offline reading."""
+        from PyQt6.QtCore import QUrlQuery
+        query = QUrlQuery(url)
+        page_id = query.queryItemValue("id")
+        html_content = storage.get_saved_page_html(page_id)
+        if not html_content:
+            return self._page_error("shroud://savedview?id=" + page_id)
+        # Find metadata
+        pages = storage.load_saved_pages()
+        meta = next((p for p in pages if p.get("id") == page_id), {})
+        orig_url = meta.get("url", "")
+        title = meta.get("title", "Saved Page")
+
+        esc_title = html_mod.escape(title)
+        esc_url = html_mod.escape(orig_url)
+
+        # Inject a toolbar into the saved page
+        toolbar = f"""<div style="position:fixed;top:0;left:0;right:0;z-index:2147483647;
+            background:{BG_MID};border-bottom:1px solid {BORDER};
+            padding:6px 16px;display:flex;align-items:center;gap:12px;
+            font-family:-apple-system,Cantarell,sans-serif;font-size:12px;">
+            <span style="color:{ACCENT};font-weight:600;">SAVED</span>
+            <span style="color:{TEXT_DIM};flex:1;overflow:hidden;text-overflow:ellipsis;
+                white-space:nowrap;">{esc_title} &mdash; {esc_url}</span>
+            <a href="{esc_url}" style="color:{GREEN};text-decoration:none;font-size:11px;">Visit Original</a>
+            <a href="shroud://saved" style="color:{ACCENT};text-decoration:none;font-size:11px;">Back to List</a>
+        </div>
+        <div style="height:36px;"></div>"""
+
+        # Inject toolbar right after <body> tag
+        import re
+        modified = re.sub(
+            r'(<body[^>]*>)', r'\1' + toolbar,
+            html_content, count=1, flags=re.IGNORECASE,
+        )
+        if modified == html_content:
+            # No <body> tag found — prepend
+            modified = toolbar + html_content
+
+        return modified
 
     def _page_watches(self):
         """Generate the shroud://watches page watch management page."""

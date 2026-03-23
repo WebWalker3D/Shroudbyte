@@ -502,6 +502,61 @@ def clear_screen_time():
 
 
 # ---------------------------------------------------------------------------
+# Saved pages (offline snapshots)
+# ---------------------------------------------------------------------------
+
+import hashlib
+
+_SAVED_DIR = DATA_DIR / "saved"
+
+
+def load_saved_pages() -> list[dict]:
+    """Return list of saved page metadata, newest first."""
+    return _load_json("saved_pages.json", [])
+
+
+def save_page(url: str, title: str, html: str, text_preview: str = ""):
+    """Save a page snapshot. Stores HTML in a separate file."""
+    _ensure_dir()
+    _SAVED_DIR.mkdir(parents=True, exist_ok=True)
+
+    page_id = hashlib.sha256(url.encode()).hexdigest()[:16]
+    html_path = _SAVED_DIR / f"{page_id}.html"
+    html_path.write_text(html, encoding="utf-8")
+
+    pages = load_saved_pages()
+    # Remove existing snapshot of the same URL (re-save updates it)
+    pages = [p for p in pages if p.get("url") != url]
+    pages.insert(0, {
+        "id": page_id,
+        "url": url,
+        "title": title,
+        "preview": text_preview[:200],
+        "saved": time.time(),
+        "size": len(html),
+    })
+    _save_json("saved_pages.json", pages)
+
+
+def get_saved_page_html(page_id: str) -> str:
+    """Return the HTML content of a saved page."""
+    path = _SAVED_DIR / f"{page_id}.html"
+    if path.exists():
+        return path.read_text(encoding="utf-8")
+    return ""
+
+
+def remove_saved_page(page_id: str):
+    """Delete a saved page snapshot."""
+    path = _SAVED_DIR / f"{page_id}.html"
+    if path.exists():
+        path.unlink()
+    pages = load_saved_pages()
+    pages = [p for p in pages if p.get("id") != page_id]
+    _save_json("saved_pages.json", pages)
+
+
+# ---------------------------------------------------------------------------
 # URL autocomplete suggestions
 # ---------------------------------------------------------------------------
 

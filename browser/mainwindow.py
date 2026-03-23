@@ -326,22 +326,26 @@ class MainWindow(QMainWindow):
         """Load filter lists in a thread after the window is visible."""
         import threading
 
-        def _load():
-            filterlists.get_all_blocked_hosts()
-            filterlists.get_cosmetic_css()
-
-        def _apply():
-            self._adblocker.reload_hosts()
-            self._link_resolver.update_blocked_hosts(self._adblocker._blocked_hosts)
-            self._cosmetic_css = filterlists.get_cosmetic_css()
-            self._update_adblock_label()
-
         def _worker():
-            _load()
+            # Do ALL heavy work in the background thread
+            custom = storage.load_blocked_hosts()
+            filter_hosts = filterlists.get_all_blocked_hosts()
+            from .adblock import DEFAULT_BLOCKED
+            blocked = DEFAULT_BLOCKED | custom | filter_hosts
+            css = filterlists.get_cosmetic_css()
+
+            # Only assign results on the GUI thread — no parsing, no I/O
             from PyQt6.QtCore import QTimer
-            QTimer.singleShot(0, _apply)
+            QTimer.singleShot(0, lambda: self._apply_filter_results(blocked, css))
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _apply_filter_results(self, blocked_hosts, cosmetic_css):
+        """Apply pre-computed filter results on the GUI thread (fast)."""
+        self._adblocker._blocked_hosts = blocked_hosts
+        self._link_resolver.update_blocked_hosts(blocked_hosts)
+        self._cosmetic_css = cosmetic_css
+        self._update_adblock_label()
 
     def _autosave_session(self):
         """Periodically save the current session to disk."""
@@ -355,10 +359,14 @@ class MainWindow(QMainWindow):
                 url = deferred or view.url().toString()
                 title = view.title() or self._tabs.tabText(i)
                 if url and not url.startswith("shroud:"):
-                    tabs.append({
+                    tab_data = {
                         "url": url, "title": title,
                         "pinned": getattr(view, '_pinned', False),
-                    })
+                    }
+                    note = getattr(view, '_tab_note', '')
+                    if note:
+                        tab_data["note"] = note
+                    tabs.append(tab_data)
         if tabs:
             storage.save_session(tabs)
 
@@ -536,6 +544,13 @@ class MainWindow(QMainWindow):
         self._status = QStatusBar()
         self.setStatusBar(self._status)
 
+        self._reading_time_label = QLabel()
+        self._reading_time_label.setStyleSheet(
+            f"color: {style.TEXT_FAINT}; font-size: 11px; padding: 0 8px;"
+        )
+        self._reading_time_label.setVisible(False)
+        self._status.addPermanentWidget(self._reading_time_label)
+
         self._watch_label = QPushButton()
         self._watch_label.setFlat(True)
         self._watch_label.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -576,6 +591,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self._make_action("New Window", self._open_new_window, "Ctrl+N"))
         file_menu.addAction(self._make_action("New Private Window", self._open_private_window, "Ctrl+Shift+P"))
         file_menu.addSeparator()
+        file_menu.addAction(self._make_action("Save Page Offline", self._quick_save_page, "Ctrl+Shift+D"))
         file_menu.addAction(self._make_action("Print\u2026", self._print_page, "Ctrl+P"))
         file_menu.addAction(self._make_action("Save as PDF\u2026", self._save_pdf, "Ctrl+Shift+S"))
         file_menu.addSeparator()
@@ -592,6 +608,9 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self._make_action("Reader Mode", self._toggle_reader_mode, "F9"))
         view_menu.addSeparator()
         view_menu.addAction(self._make_action("View Source", self._view_source, "Ctrl+U"))
+        view_menu.addSeparator()
+        view_menu.addAction(self._make_action("Search Tabs", self._show_tab_search, "Ctrl+Shift+F"))
+        view_menu.addAction(self._make_action("Group Tabs by Site", self._group_tabs_by_domain, "Ctrl+Shift+G"))
         view_menu.addSeparator()
         view_menu.addAction(self._make_action("Picture in Picture", self._toggle_pip))
 
@@ -630,6 +649,8 @@ class MainWindow(QMainWindow):
             lambda: self.add_new_tab(QUrl("shroud://watches"))))
         tools_menu.addAction(self._make_action("Screen Time",
             lambda: self.add_new_tab(QUrl("shroud://screentime"))))
+        tools_menu.addAction(self._make_action("Saved Pages",
+            lambda: self.add_new_tab(QUrl("shroud://saved"))))
         tools_menu.addAction(self._make_action("Clear Browsing Data\u2026", self._show_clear_data))
         tools_menu.addSeparator()
         tools_menu.addAction(self._make_action("Settings", self._show_settings))
@@ -683,6 +704,16 @@ class MainWindow(QMainWindow):
         stop_action.triggered.connect(lambda: self._current_view().stop())
         self.addAction(stop_action)
 
+        tab_search = QAction(self)
+        tab_search.setShortcut(QKeySequence("Ctrl+Shift+F"))
+        tab_search.triggered.connect(self._show_tab_search)
+        self.addAction(tab_search)
+
+        save_page = QAction(self)
+        save_page.setShortcut(QKeySequence("Ctrl+Shift+D"))
+        save_page.triggered.connect(self._quick_save_page)
+        self.addAction(save_page)
+
     # ------------------------------------------------------------------
     # Tab context menu
     # ------------------------------------------------------------------
@@ -708,8 +739,19 @@ class MainWindow(QMainWindow):
 
         menu.addAction("Detach Tab", lambda: self._detach_tab(index))
         menu.addSeparator()
+
+        note = getattr(view, '_tab_note', '') if view else ''
+        if note:
+            menu.addAction("Edit Note\u2026", lambda: self._edit_tab_note(index))
+            menu.addAction("Remove Note", lambda: self._remove_tab_note(index))
+        else:
+            menu.addAction("Add Note\u2026", lambda: self._edit_tab_note(index))
+        menu.addSeparator()
+
         menu.addAction("Close Tab", lambda: self._close_tab(index))
         menu.addAction("Close Other Tabs", lambda: self._close_other_tabs(index))
+        menu.addSeparator()
+        menu.addAction("Group Tabs by Site", self._group_tabs_by_domain)
         menu.exec(self._tabs.tabBar().mapToGlobal(pos))
 
     # ------------------------------------------------------------------
@@ -788,6 +830,162 @@ class MainWindow(QMainWindow):
                 if w and getattr(w, '_pinned', False):
                     continue
                 self._close_tab(i)
+
+    def _group_tabs_by_domain(self):
+        """Sort tabs by domain, keeping pinned tabs in place."""
+        current_view = self._current_view()
+        bar = self._tabs.tabBar()
+
+        # Collect unpinned tabs with their domain
+        tabs = []
+        pinned_count = 0
+        for i in range(self._tabs.count()):
+            view = self._tabs.widget(i)
+            if not view:
+                continue
+            if getattr(view, '_pinned', False):
+                pinned_count += 1
+                continue
+            url = getattr(view, '_deferred_url', None) or view.url().toString()
+            host = QUrl(url).host().lower().removeprefix("www.") if url else ""
+            tabs.append((i, view, host))
+
+        if len(tabs) < 2:
+            return
+
+        # Sort by domain, then by original position within same domain
+        tabs.sort(key=lambda t: (t[2], t[0]))
+
+        # Reorder by moving tabs to their sorted positions
+        # Work from left to right after pinned tabs
+        for new_pos_offset, (old_idx, view, host) in enumerate(tabs):
+            target = pinned_count + new_pos_offset
+            current = self._tabs.indexOf(view)
+            if current != target:
+                bar.moveTab(current, target)
+
+        # Restore focus to the originally active tab
+        if current_view:
+            idx = self._tabs.indexOf(current_view)
+            if idx >= 0:
+                self._tabs.setCurrentIndex(idx)
+
+        # Count groups for status message
+        domains = []
+        for _, _, host in tabs:
+            if not domains or domains[-1] != host:
+                domains.append(host)
+        self._status.showMessage(
+            f"Grouped {len(tabs)} tabs into {len(domains)} sites", 3000
+        )
+
+    # ------------------------------------------------------------------
+    # Tab search
+    # ------------------------------------------------------------------
+
+    def _show_tab_search(self):
+        """Show a popup to search and switch between open tabs."""
+        popup = QDialog(self)
+        popup.setWindowFlags(
+            Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint
+        )
+        popup.setStyleSheet(f"""
+            QDialog {{
+                background: {style.BG_MID};
+                border: 1px solid {style.BORDER};
+                border-radius: 12px;
+            }}
+        """)
+
+        layout = QVBoxLayout(popup)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(4)
+
+        search_input = QLineEdit()
+        search_input.setPlaceholderText("Search open tabs\u2026")
+        search_input.setStyleSheet(f"""
+            QLineEdit {{
+                padding: 10px 14px; font-size: 14px;
+                background: {style.BG_DARK}; color: {style.TEXT};
+                border: 1px solid {style.BORDER}; border-radius: 8px;
+            }}
+            QLineEdit:focus {{ border-color: {style.ACCENT}; }}
+        """)
+        layout.addWidget(search_input)
+
+        results = QListWidget()
+        results.setStyleSheet(style.LIST_WIDGET_STYLE)
+        results.setMaximumHeight(400)
+        layout.addWidget(results)
+
+        # Collect all tabs
+        all_tabs = []
+        for i in range(self._tabs.count()):
+            view = self._tabs.widget(i)
+            if not view:
+                continue
+            title = view.title() or self._tabs.tabText(i)
+            url = (getattr(view, '_deferred_url', None)
+                   or view.url().toString())
+            note = getattr(view, '_tab_note', '')
+            all_tabs.append((i, title, url, note))
+
+        def populate(query=""):
+            results.clear()
+            q = query.lower()
+            for idx, title, url, note in all_tabs:
+                if q and (q not in title.lower()
+                          and q not in url.lower()
+                          and q not in note.lower()):
+                    continue
+                display = title[:60]
+                if note:
+                    display += f"  \U0001f4cc {note[:30]}"
+                item = QListWidgetItem(f"{display}\n{url[:80]}")
+                item.setData(Qt.ItemDataRole.UserRole, idx)
+                results.addItem(item)
+            if results.count() > 0:
+                results.setCurrentRow(0)
+
+        def activate(item=None):
+            item = item or results.currentItem()
+            if item:
+                idx = item.data(Qt.ItemDataRole.UserRole)
+                self._tabs.setCurrentIndex(idx)
+                popup.close()
+
+        populate()
+        search_input.textChanged.connect(populate)
+        results.itemActivated.connect(activate)
+
+        # Enter key activates, up/down navigate the list
+        def on_key(event):
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                activate()
+            elif event.key() == Qt.Key.Key_Down:
+                row = results.currentRow()
+                if row < results.count() - 1:
+                    results.setCurrentRow(row + 1)
+            elif event.key() == Qt.Key.Key_Up:
+                row = results.currentRow()
+                if row > 0:
+                    results.setCurrentRow(row - 1)
+            elif event.key() == Qt.Key.Key_Escape:
+                popup.close()
+            else:
+                QLineEdit.keyPressEvent(search_input, event)
+
+        search_input.keyPressEvent = on_key
+
+        # Position centered near top of window
+        popup.resize(480, min(500, self.height() - 100))
+        geo = self.geometry()
+        popup.move(
+            geo.x() + (geo.width() - 480) // 2,
+            geo.y() + 80,
+        )
+        popup.show()
+        search_input.setFocus()
 
     # ------------------------------------------------------------------
     # Tab management
@@ -924,6 +1122,60 @@ class MainWindow(QMainWindow):
             self._update_bookmark_btn(url)
             if url.scheme() not in ("shroud", ""):
                 self._screen_time.set_domain(url.host())
+            # Duplicate tab detection
+            self._check_duplicate_tab(view, url)
+
+    def _check_duplicate_tab(self, view, url):
+        """Show a bar if another tab has the same URL."""
+        # Dismiss previous duplicate bar if any
+        if hasattr(self, '_dup_bar') and self._dup_bar:
+            self._dup_bar._remove()
+            self._dup_bar = None
+
+        url_str = url.toString()
+        if not url_str or url_str.startswith("shroud:"):
+            return
+
+        for i in range(self._tabs.count()):
+            other = self._tabs.widget(i)
+            if other is view or not other:
+                continue
+            other_url = (getattr(other, '_deferred_url', None)
+                         or other.url().toString())
+            if other_url == url_str:
+                bar = QFrame()
+                bar.setStyleSheet(
+                    f"QFrame {{ background: {style.BG_CARD}; "
+                    f"border-bottom: 1px solid {style.BORDER}; "
+                    f"padding: 6px 14px; }}"
+                )
+                h = QHBoxLayout(bar)
+                h.setContentsMargins(12, 6, 12, 6)
+                h.setSpacing(10)
+                label = QLabel("This page is already open in another tab.")
+                label.setStyleSheet(f"color: {style.TEXT_DIM}; font-size: 13px;")
+                switch_btn = QPushButton("Switch to it")
+                switch_btn.setStyleSheet(style.DIALOG_BTN_PRIMARY_STYLE)
+                switch_btn.setFixedHeight(28)
+                dismiss_btn = QPushButton("Dismiss")
+                dismiss_btn.setStyleSheet(style.DIALOG_BTN_STYLE)
+                dismiss_btn.setFixedHeight(28)
+                other_idx = i
+                switch_btn.clicked.connect(lambda _, idx=other_idx: (
+                    self._tabs.setCurrentIndex(idx), bar._remove(),
+                ))
+                dismiss_btn.clicked.connect(bar._remove)
+                bar._remove = lambda: (
+                    bar.setParent(None), bar.deleteLater(),
+                    setattr(self, '_dup_bar', None),
+                )
+                h.addWidget(label)
+                h.addStretch()
+                h.addWidget(switch_btn)
+                h.addWidget(dismiss_btn)
+                self._central_layout.insertWidget(0, bar)
+                self._dup_bar = bar
+                return
 
     def _tab_title_changed(self, view, title):
         index = self._tabs.indexOf(view)
@@ -938,7 +1190,9 @@ class MainWindow(QMainWindow):
                 elif view.page().recentlyAudible():
                     display = "\U0001f50a " + display
                 self._tabs.setTabText(index, display)
-                self._tabs.setTabToolTip(index, title)
+                note = getattr(view, '_tab_note', '')
+                tip = f"{title}\n\U0001f4cc {note}" if note else title
+                self._tabs.setTabToolTip(index, tip)
         if view == self._current_view():
             self._update_title(title)
 
@@ -975,6 +1229,42 @@ class MainWindow(QMainWindow):
         view._muted = muted
         view.page().setAudioMuted(muted)
         self._tab_audio_changed(view, view.page().recentlyAudible())
+
+    # ------------------------------------------------------------------
+    # Tab notes
+    # ------------------------------------------------------------------
+
+    def _edit_tab_note(self, index):
+        view = self._tabs.widget(index)
+        if not view:
+            return
+        current = getattr(view, '_tab_note', '')
+        text, ok = QInputDialog.getText(
+            self, "Tab Note",
+            "Note for this tab:",
+            QLineEdit.EchoMode.Normal,
+            current,
+        )
+        if ok:
+            view._tab_note = text.strip()
+            self._update_tab_tooltip(index)
+
+    def _remove_tab_note(self, index):
+        view = self._tabs.widget(index)
+        if view:
+            view._tab_note = ''
+            self._update_tab_tooltip(index)
+
+    def _update_tab_tooltip(self, index):
+        view = self._tabs.widget(index)
+        if not view:
+            return
+        title = view.title() or view.url().toString()
+        note = getattr(view, '_tab_note', '')
+        if note:
+            self._tabs.setTabToolTip(index, f"{title}\n\U0001f4cc {note}")
+        else:
+            self._tabs.setTabToolTip(index, title)
 
     def _tab_icon_changed(self, view, icon):
         index = self._tabs.indexOf(view)
@@ -1223,6 +1513,13 @@ class MainWindow(QMainWindow):
                     draft = storage.get_form_draft(url)
                     draft_json = json.dumps(draft) if draft else "null"
                     view.page().runJavaScript(self._get_form_draft_js(draft_json))
+                # Estimate reading time
+                view.page().runJavaScript(
+                    "(document.body&&document.body.innerText||'').split(/\\s+/).length",
+                    self._update_reading_time,
+                )
+            else:
+                self._reading_time_label.setVisible(False)
             if self._vault.is_unlocked:
                 self._check_page_for_passwords()
                 self._check_session_for_credentials()
@@ -1362,6 +1659,20 @@ class MainWindow(QMainWindow):
         view = self._current_view()
         if view:
             view.triggerPageAction(view.page().WebAction.ReloadAndBypassCache)
+
+    def _update_reading_time(self, word_count):
+        """Update the reading time estimate in the status bar."""
+        if not word_count or word_count < 100:
+            self._reading_time_label.setVisible(False)
+            return
+        minutes = max(1, round(word_count / 238))
+        if minutes < 60:
+            self._reading_time_label.setText(f"  ~{minutes} min read")
+        else:
+            h = minutes // 60
+            m = minutes % 60
+            self._reading_time_label.setText(f"  ~{h}h {m}m read")
+        self._reading_time_label.setVisible(True)
 
     def _update_adblock_label(self):
         if self._adblocker.enabled:
@@ -1834,6 +2145,9 @@ class MainWindow(QMainWindow):
         elif action == "clear_screentime":
             storage.clear_screen_time()
             self._status.showMessage("Screen time data cleared", 2000)
+        elif action == "del_saved" and arg:
+            storage.remove_saved_page(arg)
+            self._status.showMessage("Saved page deleted", 2000)
 
     def _show_bookmarks(self):
         view = self._current_view()
@@ -2054,6 +2368,28 @@ class MainWindow(QMainWindow):
     def _open_source_tab(self, html):
         self._pending_source_html = html
         self.add_new_tab(QUrl("shroud://source"))
+
+    # ------------------------------------------------------------------
+    # Quick save page offline
+    # ------------------------------------------------------------------
+
+    def _quick_save_page(self):
+        """Save the current page as an offline snapshot with one keystroke."""
+        view = self._current_view()
+        if not view:
+            return
+        url = view.url().toString()
+        if not url or url.startswith("shroud:"):
+            self._status.showMessage("Cannot save internal pages", 2000)
+            return
+        title = view.title() or url
+        view.page().toHtml(lambda html: self._finish_save_page(url, title, html))
+
+    def _finish_save_page(self, url, title, html):
+        from .pagewatcher import _extract_text
+        preview = _extract_text(html)[:200] if html else ""
+        storage.save_page(url, title, html, preview)
+        self._status.showMessage(f"Saved: {title[:50]}", 3000)
 
     # ------------------------------------------------------------------
     # Find on page (enhanced find bar)
@@ -3630,11 +3966,17 @@ class MainWindow(QMainWindow):
                 for i, tab_info in enumerate(session):
                     url = tab_info.get("url", "")
                     title = tab_info.get("title", "")
+                    note = tab_info.get("note", "")
                     if url and not url.startswith("shroud:"):
                         if i == 0:
                             self.add_new_tab(url)
                         else:
                             self._add_lazy_tab(url, title)
+                        if note:
+                            view = self._tabs.widget(self._tabs.count() - 1)
+                            if view:
+                                view._tab_note = note
+                                self._update_tab_tooltip(self._tabs.count() - 1)
                         if tab_info.get("pinned", False):
                             pinned_indices.append(self._tabs.count() - 1)
                 # Restore pinned state
