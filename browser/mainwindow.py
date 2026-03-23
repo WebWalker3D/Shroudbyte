@@ -9,7 +9,7 @@ import sys
 import time
 from functools import partial
 
-from PyQt6.QtCore import Qt, QUrl, QSize, QSortFilterProxyModel, QModelIndex, QEvent, QObject
+from PyQt6.QtCore import Qt, QUrl, QSize, QSortFilterProxyModel, QModelIndex, QEvent, QObject, QTimer
 from PyQt6.QtGui import QAction, QIcon, QKeySequence, QFont, QPalette, QColor
 from PyQt6.QtWebEngineCore import (
     QWebEnginePage, QWebEngineProfile, QWebEngineScript, QWebEngineSettings,
@@ -79,16 +79,23 @@ from . import style
 class _SubstringFilterModel(QSortFilterProxyModel):
     """Proxy model that matches when the filter string appears *anywhere* in the row."""
 
+    _cached_pattern = ""
+
+    def setFilterFixedString(self, pattern):
+        self._cached_pattern = pattern.lower()
+        super().setFilterFixedString(pattern)
+
     def filterAcceptsRow(self, source_row, source_parent):
-        pattern = self.filterRegularExpression().pattern().lower()
+        pattern = self._cached_pattern
         if not pattern:
             return True
         model = self.sourceModel()
-        # Check both the URL (column 0) and title (Qt.UserRole+1 stored in column 0)
         idx = model.index(source_row, 0, source_parent)
         url = (model.data(idx, Qt.ItemDataRole.DisplayRole) or "").lower()
+        if pattern in url:
+            return True
         title = (model.data(idx, Qt.ItemDataRole.UserRole + 1) or "").lower()
-        return pattern in url or pattern in title
+        return pattern in title
 
 
 class _SuggestionDelegate(QStyledItemDelegate):
@@ -1425,21 +1432,33 @@ class MainWindow(QMainWindow):
     def _refresh_suggestions(self):
         """Reload the completer model from history + bookmarks."""
         suggestions = storage.get_url_suggestions()
+        self._completer_model.blockSignals(True)
         self._completer_model.clear()
         for url, title, _freq in suggestions:
             item = QStandardItem(url)
             item.setData(title, Qt.ItemDataRole.UserRole + 1)
             self._completer_model.appendRow(item)
+        self._completer_model.blockSignals(False)
+        self._completer_proxy.invalidate()
 
     def _filter_completions(self, text):
-        """Update the proxy filter as the user types."""
+        """Update the proxy filter as the user types (debounced)."""
         # Don't re-filter while the user is arrowing through the popup —
         # Qt updates the line edit text as items are highlighted, which
         # would reset the model and snap the selection back to row 0.
         popup = self._url_completer.popup()
         if popup.isVisible() and popup.currentIndex().isValid():
             return
-        self._completer_proxy.setFilterFixedString(text)
+        if not hasattr(self, '_filter_timer'):
+            self._filter_timer = QTimer(self)
+            self._filter_timer.setSingleShot(True)
+            self._filter_timer.timeout.connect(self._apply_filter)
+        self._pending_filter_text = text
+        self._filter_timer.start(120)
+
+    def _apply_filter(self):
+        """Apply the debounced filter text to the proxy model."""
+        self._completer_proxy.setFilterFixedString(self._pending_filter_text)
 
     def _on_completion_activated(self, index):
         """Navigate to the URL chosen from the popup."""
