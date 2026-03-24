@@ -268,9 +268,13 @@ class NavigationMixin:
         # Don't re-filter while the user is arrowing through the popup —
         # Qt updates the line edit text as items are highlighted, which
         # would reset the model and snap the selection back to row 0.
+        # But if the text no longer matches the highlighted item, the user
+        # actually typed or deleted — allow the filter to run.
         popup = self._url_completer.popup()
         if popup.isVisible() and popup.currentIndex().isValid():
-            return
+            highlighted = popup.currentIndex().data(Qt.ItemDataRole.DisplayRole)
+            if highlighted == text:
+                return
         if not hasattr(self, '_filter_timer'):
             self._filter_timer = QTimer(self)
             self._filter_timer.setSingleShot(True)
@@ -286,8 +290,8 @@ class NavigationMixin:
         # Inject open-tab matches into the model
         self._inject_tab_matches(text)
 
-        # Trigger live search suggestions for queries >= 3 chars
-        if len(text) >= 3:
+        # Trigger live search suggestions for queries >= 3 chars (opt-in)
+        if len(text) >= 3 and self._settings.get("search_suggestions", False):
             if not hasattr(self, '_search_suggest_timer'):
                 self._search_suggest_timer = QTimer(self)
                 self._search_suggest_timer.setSingleShot(True)

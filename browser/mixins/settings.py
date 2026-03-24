@@ -29,7 +29,7 @@ class SettingsMixin:
         if action == "save":
             s = data.get("settings", {})
             for key in (
-                "dark_mode",
+                "dark_mode", "wallpaper",
                 "search_engine", "enable_javascript", "enable_adblock",
                 "default_zoom", "user_agent", "https_only", "do_not_track",
                 "restore_session", "strip_tracking", "fingerprint_resistance",
@@ -37,6 +37,7 @@ class SettingsMixin:
                 "form_draft_autosave", "annoyance_shield",
                 "remember_scroll_position", "screen_time_tracking",
                 "clipboard_history",
+                "search_suggestions",
                 "dns_over_https", "dns_over_https_provider", "custom_dns_fallback",
             ):
                 if key in s:

@@ -1005,6 +1005,14 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
           <label class="toggle"><input type="checkbox" id="dark_mode"
             {_chk('dark_mode', True)}><span class="slider"></span></label>
         </div>
+        <div class="row">
+          <div class="row-label">New tab wallpaper
+            <div class="row-hint">Absolute path to an image file (leave blank for none)</div>
+          </div>
+          <input type="text" id="wallpaper"
+            value="{html_mod.escape(settings.get('wallpaper', ''))}"
+            placeholder="/home/user/wallpaper.jpg">
+        </div>
       </div>
 
       <div class="section">
@@ -1083,6 +1091,17 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
             value="{html_mod.escape(settings.get('search_engine', ''))}"
             placeholder="https://duckduckgo.com/?q={{}}"
             style="font-family:monospace;font-size:12px;">
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Suggestions</div>
+        <div class="row">
+          <div class="row-label">Search suggestions
+            <div class="row-hint">Sends keystrokes to your search engine as you type (privacy risk)</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="search_suggestions"
+            {_chk('search_suggestions')}><span class="slider"></span></label>
         </div>
       </div>
     </div>
@@ -1304,6 +1323,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
     function saveSettings() {{
       var s = {{
         dark_mode: getVal('dark_mode'),
+        wallpaper: getVal('wallpaper'),
         search_engine: getVal('search_engine'),
         enable_javascript: getVal('enable_javascript'),
         enable_adblock: getVal('enable_adblock'),
@@ -1323,6 +1343,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         screen_time_tracking: getVal('screen_time_tracking'),
         clipboard_history: getVal('clipboard_history'),
         remember_scroll_position: getVal('remember_scroll_position'),
+        search_suggestions: getVal('search_suggestions'),
         dns_over_https: getVal('dns_over_https'),
         dns_over_https_provider: getVal('dns_over_https_provider'),
         custom_dns_fallback: getVal('custom_dns_fallback')
