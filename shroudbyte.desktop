@@ -6,4 +6,5 @@ Type=Application
 Categories=Network;WebBrowser;
 Icon=/home/blaine/Blade-Browser/shroudbyte-icon.svg
 Terminal=false
-StartupNotify=true
+StartupNotify=false
+DBusActivatable=false

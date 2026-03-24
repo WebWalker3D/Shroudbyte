@@ -206,7 +206,7 @@ def main():
         app = QApplication(qt_argv)
         app.setApplicationName(__app_name__)
         app.setOrganizationName("Shroudbyte")
-        app.setDesktopFileName("shroudbyte")
+        app.setDesktopFileName(f"shroudbyte-{os.getpid()}")
 
         # Apply theme palette for dialogs and system widgets
         from PyQt6.QtGui import QPalette
