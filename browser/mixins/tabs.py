@@ -527,14 +527,14 @@ class TabMixin:
                 dismiss_btn.setStyleSheet(style.DIALOG_BTN_STYLE)
                 dismiss_btn.setFixedHeight(28)
                 other_idx = i
-                switch_btn.clicked.connect(lambda _, idx=other_idx: (
-                    self._tabs.setCurrentIndex(idx), bar._remove(),
-                ))
-                dismiss_btn.clicked.connect(bar._remove)
                 bar._remove = lambda: (
                     bar.setParent(None), bar.deleteLater(),
                     setattr(self, '_dup_bar', None),
                 )
+                switch_btn.clicked.connect(lambda _, idx=other_idx: (
+                    self._tabs.setCurrentIndex(idx), bar._remove(),
+                ))
+                dismiss_btn.clicked.connect(bar._remove)
                 h.addWidget(label)
                 h.addStretch()
                 h.addWidget(switch_btn)
