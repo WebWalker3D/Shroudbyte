@@ -12,11 +12,23 @@ from PyQt6.QtWebEngineCore import QWebEngineUrlScheme, QWebEngineUrlSchemeHandle
 from . import __app_name__, __version__
 from .newtab import generate_new_tab_html
 from . import storage
-from .style import (
-    ACCENT, ACCENT_HOVER, ACCENT_TEXT,
-    BG_DARK, BG_CARD, BG_MID, BG_HOVER, BG_ACTIVE,
-    TEXT, TEXT_DIM, TEXT_FAINT, BORDER, GREEN, RED, YELLOW,
-)
+from . import style as _style_mod
+
+
+def _refresh_colors():
+    """Pull current theme colours into module-level names so existing
+    f-strings pick up dark/light changes without modifications."""
+    g = globals()
+    for _name in (
+        "BG_DARK", "BG_MID", "BG_CARD", "BG_HOVER", "BG_ACTIVE",
+        "BORDER", "ACCENT", "ACCENT_HOVER", "ACCENT_TEXT",
+        "TEXT", "TEXT_DIM", "TEXT_FAINT", "GREEN", "RED", "YELLOW",
+        "ACCENT_ALPHA",
+    ):
+        g[_name] = getattr(_style_mod, _name)
+
+
+_refresh_colors()
 
 
 def register_shroud_scheme():
@@ -62,6 +74,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         self._profile = profile
 
     def requestStarted(self, job):
+        _refresh_colors()
         url = job.requestUrl()
         host = url.host().lower()
 
@@ -192,7 +205,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
   .nav-item:hover {{ color: {TEXT}; background: {BG_HOVER}; }}
   .nav-item.active {{
     color: {ACCENT}; border-left-color: {ACCENT};
-    background: rgba(205, 141, 106, 0.06);
+    background: {ACCENT_ALPHA};
   }}
   .nav-icon {{ font-size: 14px; width: 18px; text-align: center; }}
   .sub-nav {{
@@ -839,7 +852,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
   .nav-item:hover {{ color: {TEXT}; background: {BG_HOVER}; }}
   .nav-item.active {{
     color: {ACCENT}; border-left-color: {ACCENT};
-    background: rgba(205, 141, 106, 0.06);
+    background: {ACCENT_ALPHA};
   }}
   .nav-icon {{ font-size: 15px; width: 20px; text-align: center; }}
   .sidebar-footer {{
@@ -984,6 +997,25 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
       <div class="page-title">General</div>
 
       <div class="section">
+        <div class="section-title">Appearance</div>
+        <div class="row">
+          <div class="row-label">Dark mode
+            <div class="row-hint">Use a dark colour scheme for the browser UI and internal pages</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="dark_mode"
+            {_chk('dark_mode', True)}><span class="slider"></span></label>
+        </div>
+        <div class="row">
+          <div class="row-label">New tab wallpaper
+            <div class="row-hint">Absolute path to an image file (leave blank for none)</div>
+          </div>
+          <input type="text" id="wallpaper"
+            value="{html_mod.escape(settings.get('wallpaper', ''))}"
+            placeholder="/home/user/wallpaper.jpg">
+        </div>
+      </div>
+
+      <div class="section">
         <div class="section-title">Startup</div>
         <div class="row">
           <div class="row-label">Restore previous session</div>
@@ -1059,6 +1091,17 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
             value="{html_mod.escape(settings.get('search_engine', ''))}"
             placeholder="https://duckduckgo.com/?q={{}}"
             style="font-family:monospace;font-size:12px;">
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Suggestions</div>
+        <div class="row">
+          <div class="row-label">Search suggestions
+            <div class="row-hint">Sends keystrokes to your search engine as you type (privacy risk)</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="search_suggestions"
+            {_chk('search_suggestions')}><span class="slider"></span></label>
         </div>
       </div>
     </div>
@@ -1279,6 +1322,8 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
 
     function saveSettings() {{
       var s = {{
+        dark_mode: getVal('dark_mode'),
+        wallpaper: getVal('wallpaper'),
         search_engine: getVal('search_engine'),
         enable_javascript: getVal('enable_javascript'),
         enable_adblock: getVal('enable_adblock'),
@@ -1298,6 +1343,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         screen_time_tracking: getVal('screen_time_tracking'),
         clipboard_history: getVal('clipboard_history'),
         remember_scroll_position: getVal('remember_scroll_position'),
+        search_suggestions: getVal('search_suggestions'),
         dns_over_https: getVal('dns_over_https'),
         dns_over_https_provider: getVal('dns_over_https_provider'),
         custom_dns_fallback: getVal('custom_dns_fallback')

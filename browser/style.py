@@ -1,25 +1,125 @@
-"""Centralized stylesheet for Shroudbyte — Forged Dark theme."""
+"""Centralized stylesheet for Shroudbyte — theme support (dark / light)."""
 
-# ── Colour palette — warm, premium dark ──────────────────────────
-BG_DARK = "#0c0b10"        # deepest background — warm near-black
-BG_MID = "#14131a"          # panels / toolbar / tab bar
-BG_CARD = "#1c1b24"         # cards, inputs, surfaces
-BG_HOVER = "#262430"        # hover states
-BG_ACTIVE = "#302e3b"       # pressed / active states
-BORDER = "#282633"          # subtle warm borders
-BORDER_FOCUS = "#cd8d6a"    # copper accent for focus rings
-ACCENT = "#cd8d6a"          # primary accent — warm copper
-ACCENT_HOVER = "#dba888"    # lighter copper on hover
-ACCENT_TEXT = "#e8c8b0"     # light copper for text highlights
-TEXT = "#ede8e3"            # primary text — warm off-white
-TEXT_DIM = "#8a8494"        # secondary / muted text
-TEXT_FAINT = "#5a5568"      # placeholder text
-GREEN = "#7db88f"           # success — sage green
-RED = "#d96b6b"             # error — muted warm red
-YELLOW = "#d4a857"          # warning — warm gold
+# ── Palettes ─────────────────────────────────────────────────────
+_DARK = {
+    "BG_DARK":       "#0c0b10",
+    "BG_MID":        "#14131a",
+    "BG_CARD":       "#1c1b24",
+    "BG_HOVER":      "#262430",
+    "BG_ACTIVE":     "#302e3b",
+    "BORDER":        "#282633",
+    "BORDER_FOCUS":  "#cd8d6a",
+    "ACCENT":        "#cd8d6a",
+    "ACCENT_HOVER":  "#dba888",
+    "ACCENT_TEXT":   "#e8c8b0",
+    "TEXT":          "#ede8e3",
+    "TEXT_DIM":      "#8a8494",
+    "TEXT_FAINT":    "#5a5568",
+    "GREEN":         "#7db88f",
+    "RED":           "#d96b6b",
+    "YELLOW":        "#d4a857",
+    "TAB_HOVER_BG":  "#1a1923",
+    "ACCENT_ALPHA":  "rgba(205, 141, 106, 0.06)",
+}
+
+_LIGHT = {
+    "BG_DARK":       "#f0eeeb",
+    "BG_MID":        "#ffffff",
+    "BG_CARD":       "#f7f5f2",
+    "BG_HOVER":      "#ece9e4",
+    "BG_ACTIVE":     "#e2ded8",
+    "BORDER":        "#ddd8d0",
+    "BORDER_FOCUS":  "#b87a5a",
+    "ACCENT":        "#b87a5a",
+    "ACCENT_HOVER":  "#a06840",
+    "ACCENT_TEXT":   "#8b5e3c",
+    "TEXT":          "#2c2520",
+    "TEXT_DIM":      "#6b6460",
+    "TEXT_FAINT":    "#9a948e",
+    "GREEN":         "#3a8a52",
+    "RED":           "#c04040",
+    "YELLOW":        "#b08930",
+    "TAB_HOVER_BG":  "#f0ede8",
+    "ACCENT_ALPHA":  "rgba(184, 122, 90, 0.08)",
+}
+
+_is_dark = True
+
+# ── Module-level colour exports (updated by set_dark_mode) ──────
+BG_DARK = _DARK["BG_DARK"]
+BG_MID = _DARK["BG_MID"]
+BG_CARD = _DARK["BG_CARD"]
+BG_HOVER = _DARK["BG_HOVER"]
+BG_ACTIVE = _DARK["BG_ACTIVE"]
+BORDER = _DARK["BORDER"]
+BORDER_FOCUS = _DARK["BORDER_FOCUS"]
+ACCENT = _DARK["ACCENT"]
+ACCENT_HOVER = _DARK["ACCENT_HOVER"]
+ACCENT_TEXT = _DARK["ACCENT_TEXT"]
+TEXT = _DARK["TEXT"]
+TEXT_DIM = _DARK["TEXT_DIM"]
+TEXT_FAINT = _DARK["TEXT_FAINT"]
+GREEN = _DARK["GREEN"]
+RED = _DARK["RED"]
+YELLOW = _DARK["YELLOW"]
+TAB_HOVER_BG = _DARK["TAB_HOVER_BG"]
+ACCENT_ALPHA = _DARK["ACCENT_ALPHA"]
 
 
-GLOBAL_STYLESHEET = f"""
+# ── Theme switching ──────────────────────────────────────────────
+
+def is_dark_mode():
+    return _is_dark
+
+
+def set_dark_mode(enabled):
+    """Switch palette and rebuild every stylesheet string in this module."""
+    global _is_dark
+    _is_dark = enabled
+    palette = _DARK if enabled else _LIGHT
+    g = globals()
+    for key, val in palette.items():
+        g[key] = val
+    _rebuild()
+
+
+# ── Stylesheet builders (read current module globals) ────────────
+
+def _rebuild():
+    """Regenerate all stylesheet module globals from current colours."""
+    g = globals()
+    g["GLOBAL_STYLESHEET"] = _build_global()
+    g["NAV_BTN_STYLE"] = _build_nav_btn()
+    g["URL_BAR_STYLE"] = _build_url_bar()
+    g["BOOKMARK_BTN_STYLE"] = _build_bookmark_btn()
+    g["NEW_TAB_BTN_STYLE"] = _build_new_tab_btn()
+    g["READER_BTN_ACTIVE_STYLE"] = _build_reader_btn_active()
+    g["DIALOG_BTN_STYLE"] = _build_dialog_btn()
+    g["DIALOG_BTN_PRIMARY_STYLE"] = _build_dialog_btn_primary()
+    g["DIALOG_BTN_DANGER_STYLE"] = _build_dialog_btn_danger()
+    g["LIST_WIDGET_STYLE"] = _build_list_widget()
+    g["SEARCH_INPUT_STYLE"] = _build_search_input()
+    g["SETTINGS_FORM_STYLE"] = _build_settings_form()
+    g["WATCH_LABEL_STYLE"] = _build_watch_label()
+    g["ADBLOCK_LABEL_ON_STYLE"] = _build_adblock_label_on()
+    g["ADBLOCK_LABEL_OFF_STYLE"] = _build_adblock_label_off()
+    g["COMPLETER_POPUP_STYLE"] = _build_completer_popup()
+    g["PASSWORD_DIALOG_STYLE"] = _build_password_dialog()
+    g["PASSWORD_SAVE_BAR_STYLE"] = _build_password_save_bar()
+    g["FILTER_LIST_STYLE"] = _build_filter_list()
+    g["FIND_BAR_STYLE"] = _build_find_bar()
+    g["FIND_BAR_BTN_STYLE"] = _build_find_bar_btn()
+    g["TOAST_STYLE"] = _build_toast()
+    g["SOURCE_EDITOR_STYLE"] = _build_source_editor()
+    g["PRIVACY_PANEL_STYLE"] = _build_privacy_panel()
+    g["PRIVACY_SECTION_HEADER"] = _build_privacy_section_header()
+    g["PRIVACY_SECTION_BOX"] = _build_privacy_section_box()
+    g["PRIVACY_ROW_BTN"] = _build_privacy_row_btn()
+    g["PRIVACY_ROW_BTN_DANGER"] = _build_privacy_row_btn_danger()
+
+
+def _build_global():
+    return f"""
 /* ── Main window ─────────────────────────────────── */
 QMainWindow {{
     background: {BG_DARK};
@@ -98,7 +198,7 @@ QTabBar::tab:selected {{
 }}
 QTabBar::tab:hover:!selected {{
     color: {TEXT_DIM};
-    background: #1a1923;
+    background: {TAB_HOVER_BG};
 }}
 QTabBar::close-button {{
     image: none;
@@ -191,9 +291,10 @@ QLabel {{
 """
 
 
-# ── Component-level styles used in code ──────────────────────
+# ── Component-level styles ───────────────────────────────────────
 
-NAV_BTN_STYLE = f"""
+def _build_nav_btn():
+    return f"""
     QPushButton {{
         font-size: 14px;
         font-weight: 500;
@@ -215,7 +316,9 @@ NAV_BTN_STYLE = f"""
     }}
 """
 
-URL_BAR_STYLE = f"""
+
+def _build_url_bar():
+    return f"""
     QLineEdit {{
         padding: 9px 18px;
         font-size: 14px;
@@ -233,7 +336,9 @@ URL_BAR_STYLE = f"""
     }}
 """
 
-BOOKMARK_BTN_STYLE = f"""
+
+def _build_bookmark_btn():
+    return f"""
     QPushButton {{
         font-size: 17px;
         min-width: 34px;
@@ -254,7 +359,9 @@ BOOKMARK_BTN_STYLE = f"""
     }}
 """
 
-NEW_TAB_BTN_STYLE = f"""
+
+def _build_new_tab_btn():
+    return f"""
     QPushButton {{
         font-size: 17px;
         font-weight: bold;
@@ -276,7 +383,9 @@ NEW_TAB_BTN_STYLE = f"""
     }}
 """
 
-READER_BTN_ACTIVE_STYLE = f"""
+
+def _build_reader_btn_active():
+    return f"""
     QPushButton {{
         font-size: 13px;
         font-weight: 600;
@@ -297,7 +406,9 @@ READER_BTN_ACTIVE_STYLE = f"""
     }}
 """
 
-DIALOG_BTN_STYLE = f"""
+
+def _build_dialog_btn():
+    return f"""
     QPushButton {{
         padding: 9px 22px;
         font-size: 13px;
@@ -316,7 +427,9 @@ DIALOG_BTN_STYLE = f"""
     }}
 """
 
-DIALOG_BTN_PRIMARY_STYLE = f"""
+
+def _build_dialog_btn_primary():
+    return f"""
     QPushButton {{
         padding: 9px 22px;
         font-size: 13px;
@@ -334,7 +447,9 @@ DIALOG_BTN_PRIMARY_STYLE = f"""
     }}
 """
 
-DIALOG_BTN_DANGER_STYLE = f"""
+
+def _build_dialog_btn_danger():
+    return f"""
     QPushButton {{
         padding: 9px 22px;
         font-size: 13px;
@@ -350,7 +465,9 @@ DIALOG_BTN_DANGER_STYLE = f"""
     }}
 """
 
-LIST_WIDGET_STYLE = f"""
+
+def _build_list_widget():
+    return f"""
     QListWidget {{
         background: {BG_DARK};
         color: {TEXT};
@@ -374,7 +491,9 @@ LIST_WIDGET_STYLE = f"""
     }}
 """
 
-SEARCH_INPUT_STYLE = f"""
+
+def _build_search_input():
+    return f"""
     QLineEdit {{
         padding: 10px 16px;
         font-size: 14px;
@@ -388,7 +507,9 @@ SEARCH_INPUT_STYLE = f"""
     }}
 """
 
-SETTINGS_FORM_STYLE = f"""
+
+def _build_settings_form():
+    return f"""
     QDialog {{ background: {BG_MID}; color: {TEXT}; }}
     QLabel {{ color: {TEXT_DIM}; font-size: 13px; }}
     QLineEdit {{
@@ -423,24 +544,33 @@ SETTINGS_FORM_STYLE = f"""
     QDialogButtonBox {{ button-layout: 0; }}
 """
 
-WATCH_LABEL_STYLE = (
-    f"QPushButton {{ color: {ACCENT_TEXT}; font-size: 11px; padding: 0 8px; "
-    f"border: none; background: transparent; }}"
-    f"QPushButton:hover {{ color: {TEXT}; }}"
-)
 
-ADBLOCK_LABEL_ON_STYLE = (
-    f"QPushButton {{ color: {GREEN}; font-size: 11px; padding: 0 8px; "
-    f"border: none; background: transparent; }}"
-    f"QPushButton:hover {{ color: {ACCENT_TEXT}; }}"
-)
-ADBLOCK_LABEL_OFF_STYLE = (
-    f"QPushButton {{ color: {TEXT_FAINT}; font-size: 11px; padding: 0 8px; "
-    f"border: none; background: transparent; }}"
-    f"QPushButton:hover {{ color: {TEXT_DIM}; }}"
-)
+def _build_watch_label():
+    return (
+        f"QPushButton {{ color: {ACCENT_TEXT}; font-size: 11px; padding: 0 8px; "
+        f"border: none; background: transparent; }}"
+        f"QPushButton:hover {{ color: {TEXT}; }}"
+    )
 
-COMPLETER_POPUP_STYLE = f"""
+
+def _build_adblock_label_on():
+    return (
+        f"QPushButton {{ color: {GREEN}; font-size: 11px; padding: 0 8px; "
+        f"border: none; background: transparent; }}"
+        f"QPushButton:hover {{ color: {ACCENT_TEXT}; }}"
+    )
+
+
+def _build_adblock_label_off():
+    return (
+        f"QPushButton {{ color: {TEXT_FAINT}; font-size: 11px; padding: 0 8px; "
+        f"border: none; background: transparent; }}"
+        f"QPushButton:hover {{ color: {TEXT_DIM}; }}"
+    )
+
+
+def _build_completer_popup():
+    return f"""
     QListView {{
         background: {BG_CARD};
         color: {TEXT};
@@ -465,7 +595,9 @@ COMPLETER_POPUP_STYLE = f"""
     }}
 """
 
-PASSWORD_DIALOG_STYLE = f"""
+
+def _build_password_dialog():
+    return f"""
     QDialog {{ background: {BG_MID}; color: {TEXT}; }}
     QLabel {{ color: {TEXT_DIM}; font-size: 13px; }}
     QLineEdit {{
@@ -479,7 +611,9 @@ PASSWORD_DIALOG_STYLE = f"""
     QLineEdit:focus {{ border-color: {ACCENT}; }}
 """
 
-PASSWORD_SAVE_BAR_STYLE = f"""
+
+def _build_password_save_bar():
+    return f"""
     QFrame {{
         background: {BG_CARD};
         border-bottom: 1px solid {BORDER};
@@ -491,7 +625,9 @@ PASSWORD_SAVE_BAR_STYLE = f"""
     }}
 """
 
-FILTER_LIST_STYLE = f"""
+
+def _build_filter_list():
+    return f"""
     QDialog {{ background: {BG_MID}; color: {TEXT}; }}
     QLabel {{ color: {TEXT}; }}
     QGroupBox {{
@@ -519,7 +655,9 @@ FILTER_LIST_STYLE = f"""
     }}
 """
 
-FIND_BAR_STYLE = f"""
+
+def _build_find_bar():
+    return f"""
     QFrame {{
         background: {BG_MID};
         border-top: 1px solid {BORDER};
@@ -559,7 +697,9 @@ FIND_BAR_STYLE = f"""
     }}
 """
 
-FIND_BAR_BTN_STYLE = f"""
+
+def _build_find_bar_btn():
+    return f"""
     QPushButton {{
         padding: 5px 12px;
         font-size: 12px;
@@ -575,7 +715,9 @@ FIND_BAR_BTN_STYLE = f"""
     }}
 """
 
-TOAST_STYLE = f"""
+
+def _build_toast():
+    return f"""
     QFrame {{
         background: {BG_CARD};
         border: 1px solid {BORDER};
@@ -583,7 +725,9 @@ TOAST_STYLE = f"""
     }}
 """
 
-SOURCE_EDITOR_STYLE = f"""
+
+def _build_source_editor():
+    return f"""
     QTextEdit {{
         background: {BG_DARK};
         color: {GREEN};
@@ -594,7 +738,9 @@ SOURCE_EDITOR_STYLE = f"""
     }}
 """
 
-PRIVACY_PANEL_STYLE = f"""
+
+def _build_privacy_panel():
+    return f"""
     QDialog {{
         background: {BG_MID};
         color: {TEXT};
@@ -608,7 +754,9 @@ PRIVACY_PANEL_STYLE = f"""
     }}
 """
 
-PRIVACY_SECTION_HEADER = f"""
+
+def _build_privacy_section_header():
+    return f"""
     color: {ACCENT_TEXT};
     font-size: 11px;
     font-weight: 600;
@@ -617,7 +765,9 @@ PRIVACY_SECTION_HEADER = f"""
     padding: 8px 0 4px 0;
 """
 
-PRIVACY_SECTION_BOX = f"""
+
+def _build_privacy_section_box():
+    return f"""
     QFrame {{
         background: {BG_CARD};
         border: 1px solid {BORDER};
@@ -626,7 +776,9 @@ PRIVACY_SECTION_BOX = f"""
     }}
 """
 
-PRIVACY_ROW_BTN = f"""
+
+def _build_privacy_row_btn():
+    return f"""
     QPushButton {{
         padding: 3px 10px;
         font-size: 11px;
@@ -643,7 +795,9 @@ PRIVACY_ROW_BTN = f"""
     }}
 """
 
-PRIVACY_ROW_BTN_DANGER = f"""
+
+def _build_privacy_row_btn_danger():
+    return f"""
     QPushButton {{
         padding: 3px 10px;
         font-size: 11px;
@@ -658,3 +812,7 @@ PRIVACY_ROW_BTN_DANGER = f"""
         color: {BG_DARK};
     }}
 """
+
+
+# ── Initialise stylesheet globals ────────────────────────────────
+_rebuild()

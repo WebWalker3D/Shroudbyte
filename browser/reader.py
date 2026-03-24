@@ -1,9 +1,18 @@
 """Reader mode — article extraction and clean reading view."""
 
-from .style import (
-    ACCENT, ACCENT_HOVER, ACCENT_TEXT, BG_DARK, BG_CARD,
-    BG_MID, TEXT, TEXT_DIM, TEXT_FAINT, BORDER,
-)
+from . import style as _style_mod
+
+
+def _refresh_colors():
+    g = globals()
+    for _name in (
+        "ACCENT", "ACCENT_HOVER", "ACCENT_TEXT", "BG_DARK", "BG_CARD",
+        "BG_MID", "TEXT", "TEXT_DIM", "TEXT_FAINT", "BORDER",
+    ):
+        g[_name] = getattr(_style_mod, _name)
+
+
+_refresh_colors()
 
 # JavaScript that extracts article content from the current page.
 # Returns a dict with {title, byline, content, siteName} or null on failure.
@@ -125,6 +134,7 @@ READER_EXTRACT_JS = r"""
 
 def generate_reader_html(title, byline, content, site_name, original_url):
     """Produce a styled reader-mode HTML page."""
+    _refresh_colors()
     header_parts = []
     if byline:
         header_parts.append(f'<div class="byline">{byline}</div>')

@@ -7,9 +7,8 @@ from PyQt6.QtGui import QColor
 from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEngineSettings
 from PyQt6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
-from . import __app_name__, storage
+from . import __app_name__, storage, style
 from .adblock import AdBlockInterceptor
-from .style import GLOBAL_STYLESHEET, BG_DARK
 from .webview import ShroudWebView
 
 
@@ -86,7 +85,7 @@ class AppWindow(QMainWindow):
         # Window setup — minimal chrome
         self.setWindowTitle(__app_name__)
         self.resize(1024, 720)
-        self.setStyleSheet(GLOBAL_STYLESHEET)
+        self.setStyleSheet(style.GLOBAL_STYLESHEET)
 
         # Single web view, no tabs
         central = QWidget()

@@ -1,8 +1,10 @@
 import json
 
 from PyQt6.QtCore import QUrl
+from PyQt6.QtGui import QColor, QPalette
 
 from browser import storage
+from browser import style
 
 
 class SettingsMixin:
@@ -27,6 +29,7 @@ class SettingsMixin:
         if action == "save":
             s = data.get("settings", {})
             for key in (
+                "dark_mode", "wallpaper",
                 "search_engine", "enable_javascript", "enable_adblock",
                 "default_zoom", "user_agent", "https_only", "do_not_track",
                 "restore_session", "strip_tracking", "fingerprint_resistance",
@@ -34,6 +37,7 @@ class SettingsMixin:
                 "form_draft_autosave", "annoyance_shield",
                 "remember_scroll_position", "screen_time_tracking",
                 "clipboard_history",
+                "search_suggestions",
                 "dns_over_https", "dns_over_https_provider", "custom_dns_fallback",
             ):
                 if key in s:
@@ -104,8 +108,65 @@ class SettingsMixin:
             f"window.__shroudSettingsResult&&window.__shroudSettingsResult({json.dumps(result)})"
         )
 
+    def _apply_theme(self):
+        """Switch the UI between dark and light mode."""
+        dark = self._settings.get("dark_mode", True)
+        style.set_dark_mode(dark)
+
+        # Qt widget stylesheets
+        self.setStyleSheet(style.GLOBAL_STYLESHEET)
+
+        # QPalette for native dialogs / fallback widgets
+        from PyQt6.QtWidgets import QApplication
+        qapp = QApplication.instance()
+        if qapp:
+            palette = QPalette()
+            if dark:
+                palette.setColor(QPalette.ColorRole.Window, QColor(30, 30, 30))
+                palette.setColor(QPalette.ColorRole.WindowText, QColor(238, 238, 238))
+                palette.setColor(QPalette.ColorRole.Base, QColor(30, 30, 30))
+                palette.setColor(QPalette.ColorRole.AlternateBase, QColor(43, 43, 43))
+                palette.setColor(QPalette.ColorRole.Text, QColor(238, 238, 238))
+                palette.setColor(QPalette.ColorRole.Button, QColor(43, 43, 43))
+                palette.setColor(QPalette.ColorRole.ButtonText, QColor(238, 238, 238))
+            else:
+                palette.setColor(QPalette.ColorRole.Window, QColor(240, 238, 235))
+                palette.setColor(QPalette.ColorRole.WindowText, QColor(44, 37, 32))
+                palette.setColor(QPalette.ColorRole.Base, QColor(255, 255, 255))
+                palette.setColor(QPalette.ColorRole.AlternateBase, QColor(247, 245, 242))
+                palette.setColor(QPalette.ColorRole.Text, QColor(44, 37, 32))
+                palette.setColor(QPalette.ColorRole.Button, QColor(247, 245, 242))
+                palette.setColor(QPalette.ColorRole.ButtonText, QColor(44, 37, 32))
+            palette.setColor(QPalette.ColorRole.Highlight, QColor(41, 121, 255))
+            palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
+            palette.setColor(QPalette.ColorRole.Link, QColor(41, 121, 255))
+            qapp.setPalette(palette)
+
+        # Re-apply component styles to toolbar widgets
+        self._apply_widget_styles()
+
+        # Reload any open shroud:// pages so they pick up new colours
+        for i in range(self._tabs.count()):
+            v = self._tabs.widget(i)
+            if v and v.url().scheme() == "shroud":
+                v.reload()
+
+    def _apply_widget_styles(self):
+        """Re-apply component stylesheets to toolbar widgets after theme change."""
+        for btn in (self._back_btn, self._forward_btn, self._reload_btn,
+                    self._home_btn):
+            btn.setStyleSheet(style.NAV_BTN_STYLE)
+        self._security_icon.setStyleSheet(
+            f"color: {style.TEXT_FAINT}; font-size: 14px; padding: 0;")
+        self._url_bar.setStyleSheet(style.URL_BAR_STYLE)
+        self._bookmark_btn.setStyleSheet(style.BOOKMARK_BTN_STYLE)
+        self._new_tab_btn.setStyleSheet(style.NEW_TAB_BTN_STYLE)
+
     def _apply_settings_runtime(self):
         """Apply saved settings to running browser state."""
+        # Theme
+        self._apply_theme()
+
         # Update DNS proxy if running
         if self._dns_proxy is not None:
             _base = self._settings["custom_dns_server"].rstrip("/")
