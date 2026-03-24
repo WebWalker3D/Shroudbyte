@@ -410,8 +410,6 @@ class MainWindow(
         self._autosave_session()
         if self._dns_proxy is not None:
             self._dns_proxy.stop()
-        from . import __main__ as _main
-        _main.release_single_instance_lock()
         os.execv(sys.executable, [sys.executable, "-m", "browser"])
 
     def _apply_profile_settings(self):
