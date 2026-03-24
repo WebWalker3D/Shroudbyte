@@ -2685,6 +2685,28 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
 {table_rows}
       </table>
     </div>
+    <div class="section-label">License</div>
+    <div class="license-card">
+      <strong>GNU General Public License v3.0</strong>
+      <p>Copyright &copy; 2025–2026 WebWalker3D</p>
+      <p>
+        This program is free software: you can redistribute it and/or modify
+        it under the terms of the GNU General Public License as published by
+        the Free Software Foundation, either version 3 of the License, or
+        (at your option) any later version.
+      </p>
+      <p>
+        This program is distributed in the hope that it will be useful,
+        but WITHOUT ANY WARRANTY; without even the implied warranty of
+        MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+        GNU General Public License for more details.
+      </p>
+      <p>
+        You should have received a copy of the GNU General Public License
+        along with this program. If not, see
+        <a href="https://www.gnu.org/licenses/">https://www.gnu.org/licenses/</a>.
+      </p>
+    </div>
     <div class="section-label">Internal Pages</div>
     <div class="pages">
       {page_links}
@@ -2710,6 +2732,16 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
     letter-spacing: 3px; color: {TEXT_FAINT};
     margin-bottom: 14px; font-weight: 600;
   }}
+  .license-card {{
+    width: 100%; background: {BG_CARD};
+    border: 1px solid {BORDER}; border-radius: 12px;
+    padding: 20px 24px; margin-bottom: 36px;
+    font-size: 13px; color: {TEXT_FAINT}; line-height: 1.6;
+  }}
+  .license-card strong {{ color: {TEXT}; font-size: 14px; }}
+  .license-card p {{ margin: 10px 0 0 0; }}
+  .license-card a {{ color: {ACCENT}; text-decoration: none; }}
+  .license-card a:hover {{ text-decoration: underline; }}
   .pages {{ display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }}
   .pages a {{
     padding: 8px 16px;
