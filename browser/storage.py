@@ -173,6 +173,7 @@ DEFAULT_SETTINGS = {
     "clipboard_history": True,
     "vault_auto_lock_minutes": 15,
     "permission_ttl_days": 30,
+    "dark_mode": True,
 }
 
 

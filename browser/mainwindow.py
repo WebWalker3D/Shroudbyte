@@ -676,35 +676,49 @@ class MainWindow(
 
         # Tools menu
         tools_menu = menubar.addMenu("&Tools")
-        tools_menu.addAction(self._make_action("Password Manager", self._show_password_manager, "Ctrl+Shift+M"))
-        tools_menu.addAction(self._make_action("Auto-fill Password", self._auto_fill_password, "Ctrl+Shift+L"))
-        tools_menu.addSeparator()
-        tools_menu.addAction(self._make_action("Filter Lists\u2026", self._show_filter_lists))
-        tools_menu.addSeparator()
-        tools_menu.addAction(self._make_action("Downloads", self._show_downloads, "Ctrl+J"))
-        tools_menu.addAction(self._make_action("Developer Tools", self._open_devtools, "F12"))
-        tools_menu.addAction(self._make_action("Screenshot\u2026", self._take_screenshot, "Ctrl+Shift+E"))
-        tools_menu.addSeparator()
-        tools_menu.addAction(self._make_action("Privacy Dashboard",
+
+        # -- Privacy & Security submenu --
+        privacy_menu = tools_menu.addMenu("Privacy && Security")
+        privacy_menu.addAction(self._make_action("Privacy Dashboard",
             lambda: self.add_new_tab(QUrl("shroud://privacy"))))
-        tools_menu.addAction(self._make_action("Cookie Manager", self._show_cookie_manager))
-        tools_menu.addAction(self._make_action("Site Permissions\u2026", self._show_permissions))
-        tools_menu.addAction(self._make_action("Page Watches",
-            lambda: self.add_new_tab(QUrl("shroud://watches"))))
-        tools_menu.addAction(self._make_action("Screen Time",
-            lambda: self.add_new_tab(QUrl("shroud://screentime"))))
-        tools_menu.addAction(self._make_action("Saved Pages",
+        privacy_menu.addAction(self._make_action("Cookie Manager", self._show_cookie_manager))
+        privacy_menu.addAction(self._make_action("Site Permissions\u2026", self._show_permissions))
+        privacy_menu.addAction(self._make_action("Filter Lists\u2026", self._show_filter_lists))
+        privacy_menu.addSeparator()
+        privacy_menu.addAction(self._make_action("Clear Browsing Data\u2026", self._show_clear_data))
+
+        # -- Passwords submenu --
+        passwords_menu = tools_menu.addMenu("Passwords")
+        passwords_menu.addAction(self._make_action("Password Manager", self._show_password_manager, "Ctrl+Shift+M"))
+        passwords_menu.addAction(self._make_action("Auto-fill Password", self._auto_fill_password, "Ctrl+Shift+L"))
+
+        # -- Page Tools submenu --
+        page_menu = tools_menu.addMenu("Page Tools")
+        page_menu.addAction(self._make_action("Screenshot\u2026", self._take_screenshot, "Ctrl+Shift+E"))
+        page_menu.addAction(self._make_action("Capture Mode", self._toggle_capture))
+        page_menu.addAction(self._make_action("Captures",
+            lambda: self.add_new_tab(QUrl("shroud://captures"))))
+        page_menu.addSeparator()
+        page_menu.addAction(self._make_action("Saved Pages",
             lambda: self.add_new_tab(QUrl("shroud://saved"))))
-        tools_menu.addAction(self._make_action("Background Activity",
-            lambda: self.add_new_tab(QUrl("shroud://background"))))
+        page_menu.addAction(self._make_action("Page Watches",
+            lambda: self.add_new_tab(QUrl("shroud://watches"))))
+
+        tools_menu.addSeparator()
+
+        # -- Top-level items --
+        tools_menu.addAction(self._make_action("Downloads", self._show_downloads, "Ctrl+J"))
         tools_menu.addAction(self._make_action("Extensions",
             lambda: self.add_new_tab(QUrl("shroud://extensions"))))
         tools_menu.addAction(self._make_action("Profiles",
             lambda: self.add_new_tab(QUrl("shroud://profiles"))))
-        tools_menu.addAction(self._make_action("Capture Mode", self._toggle_capture))
-        tools_menu.addAction(self._make_action("Captures",
-            lambda: self.add_new_tab(QUrl("shroud://captures"))))
-        tools_menu.addAction(self._make_action("Clear Browsing Data\u2026", self._show_clear_data))
+        tools_menu.addSeparator()
+        tools_menu.addAction(self._make_action("Screen Time",
+            lambda: self.add_new_tab(QUrl("shroud://screentime"))))
+        tools_menu.addAction(self._make_action("Background Activity",
+            lambda: self.add_new_tab(QUrl("shroud://background"))))
+        tools_menu.addSeparator()
+        tools_menu.addAction(self._make_action("Developer Tools", self._open_devtools, "F12"))
         tools_menu.addSeparator()
         tools_menu.addAction(self._make_action("Settings", self._show_settings))
 

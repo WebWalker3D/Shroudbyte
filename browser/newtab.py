@@ -3,14 +3,25 @@
 import datetime
 
 from . import storage
-from .style import (
-    ACCENT, ACCENT_HOVER, ACCENT_TEXT, BG_DARK, BG_CARD,
-    BG_HOVER, BG_MID, TEXT, TEXT_DIM, TEXT_FAINT, BORDER,
-)
+from . import style as _style_mod
+
+
+def _refresh_colors():
+    """Pull current theme colours into module-level names."""
+    g = globals()
+    for _name in (
+        "ACCENT", "ACCENT_HOVER", "ACCENT_TEXT", "BG_DARK", "BG_CARD",
+        "BG_HOVER", "BG_MID", "TEXT", "TEXT_DIM", "TEXT_FAINT", "BORDER",
+    ):
+        g[_name] = getattr(_style_mod, _name)
+
+
+_refresh_colors()
 
 
 def generate_new_tab_html():
     """Return HTML for a styled new-tab page with search and quick links."""
+    _refresh_colors()
     bookmarks = storage.load_bookmarks()[:8]
     settings = storage.load_settings()
     search_url = settings.get("search_engine", "https://duckduckgo.com/?q={}")

@@ -12,11 +12,23 @@ from PyQt6.QtWebEngineCore import QWebEngineUrlScheme, QWebEngineUrlSchemeHandle
 from . import __app_name__, __version__
 from .newtab import generate_new_tab_html
 from . import storage
-from .style import (
-    ACCENT, ACCENT_HOVER, ACCENT_TEXT,
-    BG_DARK, BG_CARD, BG_MID, BG_HOVER, BG_ACTIVE,
-    TEXT, TEXT_DIM, TEXT_FAINT, BORDER, GREEN, RED, YELLOW,
-)
+from . import style as _style_mod
+
+
+def _refresh_colors():
+    """Pull current theme colours into module-level names so existing
+    f-strings pick up dark/light changes without modifications."""
+    g = globals()
+    for _name in (
+        "BG_DARK", "BG_MID", "BG_CARD", "BG_HOVER", "BG_ACTIVE",
+        "BORDER", "ACCENT", "ACCENT_HOVER", "ACCENT_TEXT",
+        "TEXT", "TEXT_DIM", "TEXT_FAINT", "GREEN", "RED", "YELLOW",
+        "ACCENT_ALPHA",
+    ):
+        g[_name] = getattr(_style_mod, _name)
+
+
+_refresh_colors()
 
 
 def register_shroud_scheme():
@@ -62,6 +74,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         self._profile = profile
 
     def requestStarted(self, job):
+        _refresh_colors()
         url = job.requestUrl()
         host = url.host().lower()
 
@@ -192,7 +205,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
   .nav-item:hover {{ color: {TEXT}; background: {BG_HOVER}; }}
   .nav-item.active {{
     color: {ACCENT}; border-left-color: {ACCENT};
-    background: rgba(205, 141, 106, 0.06);
+    background: {ACCENT_ALPHA};
   }}
   .nav-icon {{ font-size: 14px; width: 18px; text-align: center; }}
   .sub-nav {{
@@ -839,7 +852,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
   .nav-item:hover {{ color: {TEXT}; background: {BG_HOVER}; }}
   .nav-item.active {{
     color: {ACCENT}; border-left-color: {ACCENT};
-    background: rgba(205, 141, 106, 0.06);
+    background: {ACCENT_ALPHA};
   }}
   .nav-icon {{ font-size: 15px; width: 20px; text-align: center; }}
   .sidebar-footer {{
@@ -982,6 +995,17 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
     <!-- General -->
     <div class="panel" id="panel-general">
       <div class="page-title">General</div>
+
+      <div class="section">
+        <div class="section-title">Appearance</div>
+        <div class="row">
+          <div class="row-label">Dark mode
+            <div class="row-hint">Use a dark colour scheme for the browser UI and internal pages</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="dark_mode"
+            {_chk('dark_mode', True)}><span class="slider"></span></label>
+        </div>
+      </div>
 
       <div class="section">
         <div class="section-title">Startup</div>
@@ -1279,6 +1303,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
 
     function saveSettings() {{
       var s = {{
+        dark_mode: getVal('dark_mode'),
         search_engine: getVal('search_engine'),
         enable_javascript: getVal('enable_javascript'),
         enable_adblock: getVal('enable_adblock'),

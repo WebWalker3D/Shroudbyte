@@ -245,17 +245,30 @@ def main():
         app.setOrganizationName("Shroudbyte")
         app.setDesktopFileName("shroudbyte")
 
-        # Dark palette for dialogs and system widgets
+        # Apply theme palette for dialogs and system widgets
         from PyQt6.QtGui import QPalette
+        from . import style
+
+        dark = _settings.get("dark_mode", True)
+        style.set_dark_mode(dark)
 
         palette = QPalette()
-        palette.setColor(QPalette.ColorRole.Window, QColor(30, 30, 30))
-        palette.setColor(QPalette.ColorRole.WindowText, QColor(238, 238, 238))
-        palette.setColor(QPalette.ColorRole.Base, QColor(30, 30, 30))
-        palette.setColor(QPalette.ColorRole.AlternateBase, QColor(43, 43, 43))
-        palette.setColor(QPalette.ColorRole.Text, QColor(238, 238, 238))
-        palette.setColor(QPalette.ColorRole.Button, QColor(43, 43, 43))
-        palette.setColor(QPalette.ColorRole.ButtonText, QColor(238, 238, 238))
+        if dark:
+            palette.setColor(QPalette.ColorRole.Window, QColor(30, 30, 30))
+            palette.setColor(QPalette.ColorRole.WindowText, QColor(238, 238, 238))
+            palette.setColor(QPalette.ColorRole.Base, QColor(30, 30, 30))
+            palette.setColor(QPalette.ColorRole.AlternateBase, QColor(43, 43, 43))
+            palette.setColor(QPalette.ColorRole.Text, QColor(238, 238, 238))
+            palette.setColor(QPalette.ColorRole.Button, QColor(43, 43, 43))
+            palette.setColor(QPalette.ColorRole.ButtonText, QColor(238, 238, 238))
+        else:
+            palette.setColor(QPalette.ColorRole.Window, QColor(240, 238, 235))
+            palette.setColor(QPalette.ColorRole.WindowText, QColor(44, 37, 32))
+            palette.setColor(QPalette.ColorRole.Base, QColor(255, 255, 255))
+            palette.setColor(QPalette.ColorRole.AlternateBase, QColor(247, 245, 242))
+            palette.setColor(QPalette.ColorRole.Text, QColor(44, 37, 32))
+            palette.setColor(QPalette.ColorRole.Button, QColor(247, 245, 242))
+            palette.setColor(QPalette.ColorRole.ButtonText, QColor(44, 37, 32))
         palette.setColor(QPalette.ColorRole.Highlight, QColor(41, 121, 255))
         palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
         palette.setColor(QPalette.ColorRole.Link, QColor(41, 121, 255))
