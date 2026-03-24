@@ -2,7 +2,6 @@
 
 import ctypes
 import ctypes.util
-import fcntl
 import os
 import signal
 import subprocess
@@ -129,34 +128,6 @@ from PyQt6.QtGui import QColor
 from . import __app_name__
 from .mainwindow import MainWindow
 
-# Keep a module-level reference so the lock file stays open for the process lifetime.
-_lock_file = None
-
-
-def _acquire_single_instance_lock():
-    """Try to acquire an exclusive lock. Returns True if we are the only instance."""
-    global _lock_file
-    lock_path = _storage.DATA_DIR / "shroudbyte.lock"
-    _storage.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    _lock_file = open(lock_path, "w")
-    try:
-        fcntl.flock(_lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        _lock_file.write(str(os.getpid()))
-        _lock_file.flush()
-        return True
-    except OSError:
-        _lock_file.close()
-        _lock_file = None
-        return False
-
-
-def release_single_instance_lock():
-    """Release the instance lock so a restart can re-acquire it."""
-    global _lock_file
-    if _lock_file is not None:
-        fcntl.flock(_lock_file, fcntl.LOCK_UN)
-        _lock_file.close()
-        _lock_file = None
 
 
 def _launch_splash():
@@ -228,14 +199,6 @@ def main():
     splash_proc = None
     if not app_url:
         splash_proc = _launch_splash()
-
-    # Allow multiple instances for PWA app windows
-    if not app_url and not _acquire_single_instance_lock():
-        if splash_proc is not None:
-            splash_proc.terminate()
-            splash_proc.wait()
-        print("Shroudbyte is already running.", file=sys.stderr)
-        sys.exit(0)
 
     try:
         # Filter out --app= from argv so Chromium doesn't choke on it
