@@ -35,7 +35,7 @@ class ContentBlockingMixin:
         if view:
             url = view.url().toString()
             view._prev_url = url  # used by _load_finished to detect same-page nav
-            if self._settings.get("remember_scroll_position", True):
+            if self._settings.get("remember_scroll_position", True) and not self._private_mode:
                 if url and not url.startswith("shroud:"):
                     view.page().runJavaScript(
                         "(document.documentElement.scrollTop || document.body.scrollTop) "
@@ -76,7 +76,7 @@ class ContentBlockingMixin:
         if self._settings.get("link_intelligence", True):
             parts.append(self._get_link_intel_js())
         # Restore scroll position (skip if same-page nav / refresh)
-        if self._settings.get("remember_scroll_position", True):
+        if self._settings.get("remember_scroll_position", True) and not self._private_mode:
             cur_url = view.url().toString()
             prev_url = getattr(view, "_prev_url", "")
             if cur_url != prev_url:
@@ -87,7 +87,7 @@ class ContentBlockingMixin:
                         f"(document.documentElement.scrollHeight - window.innerHeight));"
                     )
         # Form draft auto-save
-        if self._settings.get("form_draft_autosave", True):
+        if self._settings.get("form_draft_autosave", True) and not self._private_mode:
             url = view.url().toString()
             draft = storage.get_form_draft(url)
             draft_json = json.dumps(draft) if draft else "null"

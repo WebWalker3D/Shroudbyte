@@ -149,7 +149,7 @@ DEFAULT_SETTINGS = {
     "private_mode": False,
     "default_zoom": 100,
     "user_agent": "",
-    "https_only": False,
+    "https_only": True,
     "do_not_track": True,
     "restore_session": True,
     "strip_tracking": True,

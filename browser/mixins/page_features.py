@@ -277,6 +277,8 @@ class PageFeaturesMixin:
 
     def _handle_form_draft(self, data):
         """Handle form draft save/dismiss from injected JS."""
+        if self._private_mode:
+            return
         action = data.get("action", "")
         url = data.get("url", "")
         if action == "save" and url:
