@@ -4,7 +4,7 @@ import json
 import ssl
 import urllib.request
 
-from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtCore import Qt, QUrl, QTimer
 from PyQt6.QtGui import QAction
 from PyQt6.QtWebEngineCore import (
     QWebEnginePage,
@@ -40,11 +40,16 @@ _safe_hosts_lock = threading.Lock()
 class ShroudPage(QWebEnginePage):
     """Custom page that handles new-window requests and HTTPS-only mode."""
 
+    from PyQt6.QtCore import pyqtSignal
+    _auth_probe_done = pyqtSignal(bool, str, str)  # needs_auth, url_string, host_lower
+
     def __init__(self, profile, parent=None):
         super().__init__(profile, parent)
         self._view_ref = None
         self.https_only = False
         self._pending_creds = None
+        self._auth_probed_url = None  # URL cleared to navigate after async 401 probe
+        self._auth_probe_done.connect(self._on_auth_probe_result)
         self.featurePermissionRequested.connect(self._on_permission_requested)
 
     def javaScriptAlert(self, securityOrigin, msg):
@@ -196,21 +201,45 @@ class ShroudPage(QWebEnginePage):
     # Rewrite them to "localhost" which Chromium allows through.
     _LOOPBACK_IPS = {"127.0.0.1", "::1", "[::1]"}
 
-    def _probe_for_auth(self, url_string):
-        """Quick HEAD request to detect 401 before Chromium sees it.
+    def _probe_for_auth_async(self, url):
+        """Probe for HTTP 401 in a background thread.
 
-        Returns True if the server requires HTTP authentication.
-        Returns False for any other response (200, 404, timeout, etc.).
+        If the server does NOT require auth, adds the host to _safe_hosts
+        and re-navigates.  If it does, prompts for credentials.
         """
-        try:
-            req = urllib.request.Request(url_string, method="HEAD")
-            ctx = ssl.create_default_context()
-            urllib.request.urlopen(req, timeout=1.5, context=ctx)
-            return False
-        except urllib.error.HTTPError as e:
-            return e.code == 401
-        except Exception:
-            return False
+        # Copy all values — the QUrl from acceptNavigationRequest is
+        # a temporary C++ object that is destroyed when the method returns.
+        url_string = QUrl(url).toString()
+        host_lower = (QUrl(url).host() or "").lower()
+
+        def _worker():
+            needs_auth = False
+            try:
+                req = urllib.request.Request(url_string, method="HEAD")
+                ctx = ssl.create_default_context()
+                urllib.request.urlopen(req, timeout=1.5, context=ctx)
+            except urllib.error.HTTPError as e:
+                needs_auth = e.code == 401
+            except Exception:
+                pass
+            # Signal is thread-safe; delivers to GUI thread via queued connection
+            self._auth_probe_done.emit(needs_auth, url_string, host_lower)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_auth_probe_result(self, needs_auth, url_string, host_lower):
+        """Handle probe result on the GUI thread (connected via signal)."""
+        if needs_auth:
+            mw = self._get_main_window()
+            if mw:
+                mw._prompt_http_auth(QUrl(url_string))
+        else:
+            with _safe_hosts_lock:
+                _safe_hosts.add(host_lower)
+            self._auth_probed_url = url_string
+            view = self._view_ref
+            if view:
+                view.load(QUrl(url_string))
 
     def _get_main_window(self):
         """Walk up to the MainWindow via the view reference."""
@@ -315,20 +344,21 @@ class ShroudPage(QWebEnginePage):
         # credentials; the interceptor will inject the Authorization
         # header on the retry so Chromium never sees a 401.
         if is_main_frame and url.scheme() in ("http", "https"):
-            host_lower = (host or "").lower()
-            mw = self._get_main_window()
-            has_auth = (mw and hasattr(mw, "_adblocker")
-                        and host_lower in mw._adblocker._http_auth)
-            with _safe_hosts_lock:
-                already_safe = host_lower in _safe_hosts
-            if not already_safe and not has_auth:
-                if self._probe_for_auth(url.toString()):
-                    if mw:
-                        QTimer.singleShot(
-                            0, lambda u=QUrl(url): mw._prompt_http_auth(u))
-                    return False
+            # Check if this navigation was cleared by a completed probe
+            if self._auth_probed_url and self._auth_probed_url == url.toString():
+                self._auth_probed_url = None
+            else:
+                host_lower = (host or "").lower()
+                mw = self._get_main_window()
+                has_auth = (mw and hasattr(mw, "_adblocker")
+                            and host_lower in mw._adblocker._http_auth)
                 with _safe_hosts_lock:
-                    _safe_hosts.add(host_lower)
+                    already_safe = host_lower in _safe_hosts
+                if not already_safe and not has_auth:
+                    # Block navigation now; probe in background, then
+                    # re-navigate or prompt for credentials.
+                    self._probe_for_auth_async(url)
+                    return False
 
         if self.https_only and url.scheme() == "http" and is_main_frame:
             # Don't upgrade localhost / local network

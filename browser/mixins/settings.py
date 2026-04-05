@@ -58,33 +58,33 @@ class SettingsMixin:
                 if base.endswith(suffix):
                     base = base[:-len(suffix)]
                     break
-            try:
-                import http.client, ssl as _ssl, urllib.parse
-                parsed = urllib.parse.urlparse(base)
-                # Registration connects to a user-specified server (likely self-signed
-                # pfSense cert). The server returns a cert fingerprint during
-                # registration, which is used for pinning on all subsequent requests.
-                ctx = _ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = _ssl.CERT_NONE
-                conn = http.client.HTTPSConnection(
-                    parsed.hostname, parsed.port or 443, context=ctx, timeout=10)
-                conn.connect()
-                conn.request("GET", "/shroud-dns-register")
-                resp = conn.getresponse()
-                if resp.status != 200:
-                    raise RuntimeError(f"Server returned HTTP {resp.status}")
-                reg_data = json.loads(resp.read())
-                conn.close()
-                secret = reg_data["secret"]
-                fingerprint = reg_data.get("cert_fingerprint", "")
-                storage.save_dns_secrets(self._settings, secret, fingerprint)
-                self._settings["custom_dns_enabled"] = True
-                self._settings["custom_dns_server"] = base
-                storage.save_settings(self._settings)
-                self._restart_browser()
-            except Exception as exc:
-                self._settings_page_result(view, error=f"Registration failed: {exc}")
+            import threading
+            from PyQt6.QtCore import QTimer
+
+            def _worker():
+                try:
+                    import http.client, ssl as _ssl, urllib.parse
+                    parsed = urllib.parse.urlparse(base)
+                    ctx = _ssl.create_default_context()
+                    ctx.check_hostname = False
+                    ctx.verify_mode = _ssl.CERT_NONE
+                    conn = http.client.HTTPSConnection(
+                        parsed.hostname, parsed.port or 443, context=ctx, timeout=10)
+                    conn.connect()
+                    conn.request("GET", "/shroud-dns-register")
+                    resp = conn.getresponse()
+                    if resp.status != 200:
+                        raise RuntimeError(f"Server returned HTTP {resp.status}")
+                    reg_data = json.loads(resp.read())
+                    conn.close()
+                    QTimer.singleShot(0, lambda: self._apply_dns_registration(
+                        base, reg_data))
+                except Exception as exc:
+                    msg = str(exc)
+                    QTimer.singleShot(0, lambda: self._settings_page_result(
+                        view, error=f"Registration failed: {msg}"))
+
+            threading.Thread(target=_worker, daemon=True).start()
             return
 
         if action == "unregister":
@@ -94,6 +94,16 @@ class SettingsMixin:
             storage.save_settings(self._settings)
             self._restart_browser()
             return
+
+    def _apply_dns_registration(self, base, reg_data):
+        """Apply DNS registration results on the GUI thread."""
+        secret = reg_data["secret"]
+        fingerprint = reg_data.get("cert_fingerprint", "")
+        storage.save_dns_secrets(self._settings, secret, fingerprint)
+        self._settings["custom_dns_enabled"] = True
+        self._settings["custom_dns_server"] = base
+        storage.save_settings(self._settings)
+        self._restart_browser()
 
     def _settings_page_result(self, view, msg=None, error=None):
         """Send a result message back to the settings page."""

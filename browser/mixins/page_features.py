@@ -458,6 +458,9 @@ class PageFeaturesMixin:
 
     def _install_pwa(self, view):
         """Install the current page as a PWA."""
+        import threading
+        from PyQt6.QtCore import QTimer
+
         manifest = getattr(view, '_pwa_manifest', None)
         if not manifest:
             self._status.showMessage("No web app manifest found on this page", 3000)
@@ -466,16 +469,26 @@ class PageFeaturesMixin:
         manifest_url = getattr(view, '_pwa_manifest_url', '')
 
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            app_data = install_pwa(manifest, page_url, manifest_url)
-            name = app_data.get("name", "App")
-            self._status.showMessage(
-                f"Installed: {name} — find it in your app launcher", 5000
-            )
-        except Exception as exc:
-            self._status.showMessage(f"Install failed: {exc}", 5000)
-        finally:
-            QApplication.restoreOverrideCursor()
+
+        def _worker():
+            try:
+                app_data = install_pwa(manifest, page_url, manifest_url)
+                name = app_data.get("name", "App")
+                QTimer.singleShot(0, lambda: self._on_pwa_installed(name))
+            except Exception as exc:
+                msg = str(exc)
+                QTimer.singleShot(0, lambda: self._on_pwa_install_failed(msg))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_pwa_installed(self, name):
+        QApplication.restoreOverrideCursor()
+        self._status.showMessage(
+            f"Installed: {name} — find it in your app launcher", 5000)
+
+    def _on_pwa_install_failed(self, error):
+        QApplication.restoreOverrideCursor()
+        self._status.showMessage(f"Install failed: {error}", 5000)
 
     def _uninstall_pwa_action(self, start_url):
         """Uninstall a PWA by start URL."""

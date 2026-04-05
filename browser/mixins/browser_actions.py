@@ -177,36 +177,47 @@ class BrowserActionsMixin:
         """Fetch a page using Python with Basic auth, inject via setHtml."""
         import base64
         import ssl
+        import threading
         import urllib.request
+        from PyQt6.QtCore import QTimer
 
         url_string = url.toString()
         token = base64.b64encode(f"{user}:{pw}".encode()).decode()
-        req = urllib.request.Request(url_string)
-        req.add_header("Authorization", f"Basic {token}")
-        req.add_header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/134.0.0.0 Safari/537.36")
-        ctx = ssl.create_default_context()
-        try:
-            resp = urllib.request.urlopen(req, timeout=15, context=ctx)
-            html = resp.read()
-            charset = resp.headers.get_content_charset() or "utf-8"
-            view = self._current_view()
-            if view:
-                # setHtml with baseUrl so relative resources resolve correctly
-                view.page().setHtml(
-                    html.decode(charset, errors="replace"), url)
-        except urllib.error.HTTPError as e:
-            if e.code == 401:
-                # Wrong credentials — clear cached auth and re-prompt
-                self._adblocker.clear_http_auth(host)
-                self._prompt_http_auth(url)
-            else:
-                self._status.showMessage(
-                    f"HTTP error {e.code} loading {host}", 5000)
-        except Exception as e:
-            self._status.showMessage(
-                f"Failed to load {host}: {e}", 5000)
+
+        def _worker():
+            req = urllib.request.Request(url_string)
+            req.add_header("Authorization", f"Basic {token}")
+            req.add_header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/134.0.0.0 Safari/537.36")
+            ctx = ssl.create_default_context()
+            try:
+                resp = urllib.request.urlopen(req, timeout=15, context=ctx)
+                html = resp.read()
+                charset = resp.headers.get_content_charset() or "utf-8"
+                decoded = html.decode(charset, errors="replace")
+                QTimer.singleShot(0, lambda: self._apply_authed_page(decoded, url))
+            except urllib.error.HTTPError as e:
+                if e.code == 401:
+                    QTimer.singleShot(0, lambda: self._on_auth_failed(host, url))
+                else:
+                    QTimer.singleShot(0, lambda: self._status.showMessage(
+                        f"HTTP error {e.code} loading {host}", 5000))
+            except Exception as e:
+                msg = str(e)
+                QTimer.singleShot(0, lambda: self._status.showMessage(
+                    f"Failed to load {host}: {msg}", 5000))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _apply_authed_page(self, html, url):
+        view = self._current_view()
+        if view:
+            view.page().setHtml(html, url)
+
+    def _on_auth_failed(self, host, url):
+        self._adblocker.clear_http_auth(host)
+        self._prompt_http_auth(url)
 
     # ------------------------------------------------------------------
     # Dev tools & view source
@@ -383,6 +394,8 @@ class BrowserActionsMixin:
 
     def _export_browser_data(self):
         """Export encrypted browser state to a file."""
+        import threading
+        from PyQt6.QtCore import QTimer
         from PyQt6.QtWidgets import QFileDialog, QInputDialog, QMessageBox
         from browser.export import export_state, EXPORT_COLLECTIONS
         from browser import style
@@ -405,16 +418,27 @@ class BrowserActionsMixin:
         if not path:
             return
 
-        try:
-            data = export_state(password)
-            with open(path, "wb") as f:
-                f.write(data)
-            self._status.showMessage(f"Exported to {os.path.basename(path)}", 3000)
-        except Exception as e:
-            QMessageBox.critical(self, "Export Failed", str(e))
+        self._status.showMessage("Exporting…")
+
+        def _worker():
+            try:
+                data = export_state(password)
+                with open(path, "wb") as f:
+                    f.write(data)
+                basename = os.path.basename(path)
+                QTimer.singleShot(0, lambda: self._status.showMessage(
+                    f"Exported to {basename}", 3000))
+            except Exception as e:
+                msg = str(e)
+                QTimer.singleShot(0, lambda: QMessageBox.critical(
+                    self, "Export Failed", msg))
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _import_browser_data(self):
         """Import encrypted browser state from a file."""
+        import threading
+        from PyQt6.QtCore import QTimer
         from PyQt6.QtWidgets import QFileDialog, QInputDialog, QMessageBox
         from browser.export import import_state
 
@@ -434,14 +458,22 @@ class BrowserActionsMixin:
         if not ok or not password:
             return
 
-        try:
-            with open(path, "rb") as f:
-                data = f.read()
-            result = import_state(data, password)
-            summary = ", ".join(f"{name}: {count}" for name, count in result.items())
-            self._status.showMessage(f"Imported: {summary}", 5000)
-        except Exception as e:
-            QMessageBox.critical(self, "Import Failed", str(e))
+        self._status.showMessage("Importing…")
+
+        def _worker():
+            try:
+                with open(path, "rb") as f:
+                    data = f.read()
+                result = import_state(data, password)
+                summary = ", ".join(f"{name}: {count}" for name, count in result.items())
+                QTimer.singleShot(0, lambda: self._status.showMessage(
+                    f"Imported: {summary}", 5000))
+            except Exception as e:
+                msg = str(e)
+                QTimer.singleShot(0, lambda: QMessageBox.critical(
+                    self, "Import Failed", msg))
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     # ------------------------------------------------------------------
     # Command Palette
