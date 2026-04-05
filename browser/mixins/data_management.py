@@ -275,16 +275,27 @@ class DataManagementMixin:
     def _auto_update_filterlists(self):
         if not self._settings.get("enable_adblock", True):
             return
-        try:
-            filterlists.download_all_enabled()
-            self._adblocker.reload_hosts()
-            self._cosmetic_css = filterlists.get_cosmetic_css()
-            self._settings["filterlist_last_update"] = time.time()
-            storage.save_settings(self._settings)
-            self._update_adblock_label()
-            self._status.showMessage("Filter lists updated", 3000)
-        except Exception:
-            pass
+        import threading
+
+        def _worker():
+            try:
+                filterlists.download_all_enabled()
+                css = filterlists.get_cosmetic_css()
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(0, lambda: self._apply_filterlist_update(css))
+            except Exception:
+                pass
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _apply_filterlist_update(self, css):
+        """Apply downloaded filter list results on the GUI thread."""
+        self._adblocker.reload_hosts()
+        self._cosmetic_css = css
+        self._settings["filterlist_last_update"] = time.time()
+        storage.save_settings(self._settings)
+        self._update_adblock_label()
+        self._status.showMessage("Filter lists updated", 3000)
 
     # ------------------------------------------------------------------
     # Cookie manager

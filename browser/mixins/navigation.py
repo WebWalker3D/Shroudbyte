@@ -1,4 +1,6 @@
-from PyQt6.QtCore import Qt, QUrl, QTimer
+import threading
+
+from PyQt6.QtCore import Qt, QUrl, QTimer, pyqtSignal
 from PyQt6.QtGui import QStandardItem, QStandardItemModel
 
 from browser import __app_name__, storage, style
@@ -252,8 +254,19 @@ class NavigationMixin:
     SEARCH_SUGGESTION_ROLE = Qt.ItemDataRole.UserRole + 3
 
     def _refresh_suggestions(self):
-        """Reload the completer model from history + bookmarks."""
-        suggestions = storage.get_url_suggestions()
+        """Reload the completer model from history + bookmarks (async)."""
+        if not hasattr(self, '_suggestions_connected'):
+            self._suggestions_ready_sig.connect(self._populate_suggestions)
+            self._suggestions_connected = True
+
+        def _fetch():
+            suggestions = storage.get_url_suggestions()
+            self._suggestions_ready_sig.emit(suggestions)
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _populate_suggestions(self, suggestions):
+        """Populate the completer model on the GUI thread."""
         self._completer_model.blockSignals(True)
         self._completer_model.clear()
         for url, title, _freq in suggestions:

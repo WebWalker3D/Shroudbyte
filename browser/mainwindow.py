@@ -208,6 +208,7 @@ class MainWindow(
     # runs on the GUI thread automatically via Qt's queued connection.
     from PyQt6.QtCore import pyqtSignal
     _link_resolved_sig = pyqtSignal(object, object)
+    _suggestions_ready_sig = pyqtSignal(list)
 
     def __init__(self, dns_proxy=None, private_mode=False):
         super().__init__()
