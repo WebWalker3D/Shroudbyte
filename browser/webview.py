@@ -212,6 +212,9 @@ class ShroudPage(QWebEnginePage):
         url_string = QUrl(url).toString()
         host_lower = (QUrl(url).host() or "").lower()
 
+        # Track the most recent probe so stale results are discarded
+        self._pending_probe_url = url_string
+
         def _worker():
             needs_auth = False
             try:
@@ -229,13 +232,20 @@ class ShroudPage(QWebEnginePage):
 
     def _on_auth_probe_result(self, needs_auth, url_string, host_lower):
         """Handle probe result on the GUI thread (connected via signal)."""
+        # Always record safe hosts even for stale probes
+        if not needs_auth:
+            with _safe_hosts_lock:
+                _safe_hosts.add(host_lower)
+
+        # Discard result if user has already navigated elsewhere
+        if getattr(self, '_pending_probe_url', None) != url_string:
+            return
+
         if needs_auth:
             mw = self._get_main_window()
             if mw:
                 mw._prompt_http_auth(QUrl(url_string))
         else:
-            with _safe_hosts_lock:
-                _safe_hosts.add(host_lower)
             self._auth_probed_url = url_string
             view = self._view_ref
             if view:
@@ -347,6 +357,7 @@ class ShroudPage(QWebEnginePage):
             # Check if this navigation was cleared by a completed probe
             if self._auth_probed_url and self._auth_probed_url == url.toString():
                 self._auth_probed_url = None
+                self._pending_probe_url = None
             else:
                 host_lower = (host or "").lower()
                 mw = self._get_main_window()
@@ -367,7 +378,13 @@ class ShroudPage(QWebEnginePage):
                 secure.setScheme("https")
                 self.setUrl(secure)
                 return False
-        return super().acceptNavigationRequest(url, nav_type, is_main_frame)
+
+        result = super().acceptNavigationRequest(url, nav_type, is_main_frame)
+        # Navigation proceeding — cancel any pending auth probe so a
+        # stale result doesn't override this navigation.
+        if result and is_main_frame:
+            self._pending_probe_url = None
+        return result
 
 
 class ShroudWebView(QWebEngineView):
