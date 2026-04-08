@@ -3,7 +3,7 @@
 A privacy-focused web browser built with PyQt6 and Chromium (QtWebEngine) for Linux. Features things no other browser does: link intelligence, page change monitoring, form draft auto-save, annoyance shield, scroll position memory, clipboard history, screen time tracking, offline page snapshots, and a unified internal page system.
 
 ![Python](https://img.shields.io/badge/Python-3.11+-blue)
-![License](https://img.shields.io/badge/License-MIT-green)
+![License](https://img.shields.io/badge/License-GPLv3-green)
 ![Platform](https://img.shields.io/badge/Platform-Linux-orange)
 
 ## Features
