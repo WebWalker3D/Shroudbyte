@@ -17,19 +17,12 @@ from PyQt6.QtWebEngineCore import (
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import QApplication, QDialog, QMenu, QVBoxLayout
 
-_CRED_ALERT_PREFIX = "__SHROUD_CRED_CAPTURE__:"
-_PW_FOUND_ALERT = "__SHROUD_PW_FIELDS_FOUND__"
-_LINK_HOVER_PREFIX = "__SHROUD_LINK_HOVER__:"
-_PRIVACY_ACTION_PREFIX = "__SHROUD_PRIVACY__:"
-_WATCH_ACTION_PREFIX = "__SHROUD_WATCH__:"
-_SETTINGS_ACTION_PREFIX = "__SHROUD_SETTINGS__:"
-_PAGE_ACT_PREFIX = "__SHROUD_PAGE_ACT__:"
-_FORM_DRAFT_PREFIX = "__SHROUD_FORM_DRAFT__:"
-_CLIP_PREFIX = "__SHROUD_CLIP__:"
-_PWA_PREFIX = "__SHROUD_PWA__:"
-_SW_REGISTER_PREFIX = "__SHROUD_SW_REGISTER__:"
-_PUSH_SUB_PREFIX = "__SHROUD_PUSH_SUB__:"
-_PERM_LEDGER_PREFIX = "__SHROUD_PERM_LEDGER__:"
+from . import webview_ipc as _ipc
+
+# Aliased for the JS-alert handler below (the only two prefixes that
+# don't go through the console-message dispatcher).
+_CRED_ALERT_PREFIX = _ipc.CRED_ALERT_PREFIX
+_PW_FOUND_ALERT = _ipc.PW_FOUND_ALERT
 
 # Shared set of hosts known NOT to require HTTP auth.
 # Populated on successful HEAD checks; avoids repeat probes.
@@ -76,92 +69,11 @@ class ShroudPage(QWebEnginePage):
             return
         super().javaScriptAlert(securityOrigin, msg)
 
-    # IPC dispatch table — see _dispatch_ipc below. Each entry maps a
-    # console-message prefix to (label, handler-callable). The handler
-    # receives (page, main_window, payload) where payload is the parsed
-    # JSON (or raw string for clipboard).
-    @staticmethod
-    def _ipc_link_hover(page, mw, data):
-        href = data.get("href", "")
-        if href and hasattr(mw, "_handle_link_hover"):
-            mw._handle_link_hover(href, page._view_ref)
-
-    @staticmethod
-    def _ipc_privacy(page, mw, data):
-        if hasattr(mw, "_handle_privacy_action"):
-            mw._handle_privacy_action(data)
-
-    @staticmethod
-    def _ipc_watch(page, mw, data):
-        if hasattr(mw, "_handle_watch_action"):
-            mw._handle_watch_action(data)
-
-    @staticmethod
-    def _ipc_settings(page, mw, data):
-        if hasattr(mw, "_handle_settings_action"):
-            mw._handle_settings_action(data, page._view_ref)
-
-    @staticmethod
-    def _ipc_page_action(page, mw, data):
-        if hasattr(mw, "_handle_page_action"):
-            mw._handle_page_action(data)
-
-    @staticmethod
-    def _ipc_perm_ledger(page, mw, data):
-        if hasattr(mw, "_handle_perm_ledger_action"):
-            mw._handle_perm_ledger_action(data)
-
-    @staticmethod
-    def _ipc_form_draft(page, mw, data):
-        if hasattr(mw, "_handle_form_draft"):
-            mw._handle_form_draft(data)
-
-    @staticmethod
-    def _ipc_pwa(page, mw, data):
-        if hasattr(mw, "_handle_pwa"):
-            mw._handle_pwa(data)
-
-    @staticmethod
-    def _ipc_sw_register(page, mw, data):
-        if hasattr(mw, "_bg_activity"):
-            mw._bg_activity.register_service_worker(
-                data.get("host", ""), data.get("scope", ""))
-
-    @staticmethod
-    def _ipc_push_sub(page, mw, data):
-        if hasattr(mw, "_bg_activity"):
-            mw._bg_activity.register_push_subscription(
-                data.get("host", ""), data.get("endpoint", ""))
-
-    @staticmethod
-    def _ipc_clipboard(page, mw, text):
-        # Clipboard payload is raw text, not JSON.
-        if text and hasattr(mw, "_clipboard_history"):
-            url = page.url().toString() if page._view_ref else ""
-            mw._clipboard_history.record(text, url)
-
     def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
         """Dispatch injected-JS console messages to their Python handlers."""
-        if self._dispatch_ipc(message):
+        if _ipc.dispatch(self, message):
             return
         super().javaScriptConsoleMessage(level, message, lineNumber, sourceID)
-
-    def _dispatch_ipc(self, message: str) -> bool:
-        """Try each registered prefix; return True if one matched."""
-        for prefix, label, handler, parses_json in _IPC_HANDLERS:
-            if not message.startswith(prefix):
-                continue
-            payload = message[len(prefix):]
-            try:
-                if parses_json:
-                    payload = json.loads(payload)
-                mw = self._get_main_window()
-                if mw is not None:
-                    handler(self, mw, payload)
-            except Exception:
-                logger.exception("Failed to handle %s IPC", label)
-            return True
-        return False
 
     def createWindow(self, window_type):
         view = self._view_ref
@@ -359,23 +271,6 @@ class ShroudPage(QWebEnginePage):
         if result and is_main_frame:
             self._pending_probe_url = None
         return result
-
-
-# IPC handler table — order doesn't matter (prefixes are unique). Each
-# row: (prefix, label-for-logging, handler-fn, parses_json_payload).
-_IPC_HANDLERS = (
-    (_LINK_HOVER_PREFIX,      "link-hover",            ShroudPage._ipc_link_hover,  True),
-    (_PRIVACY_ACTION_PREFIX,  "privacy",               ShroudPage._ipc_privacy,     True),
-    (_WATCH_ACTION_PREFIX,    "page-watch",            ShroudPage._ipc_watch,       True),
-    (_SETTINGS_ACTION_PREFIX, "settings",              ShroudPage._ipc_settings,    True),
-    (_PAGE_ACT_PREFIX,        "page-action",           ShroudPage._ipc_page_action, True),
-    (_PERM_LEDGER_PREFIX,     "permission-ledger",     ShroudPage._ipc_perm_ledger, True),
-    (_FORM_DRAFT_PREFIX,      "form-draft",            ShroudPage._ipc_form_draft,  True),
-    (_PWA_PREFIX,             "PWA",                   ShroudPage._ipc_pwa,         True),
-    (_SW_REGISTER_PREFIX,     "service-worker",        ShroudPage._ipc_sw_register, True),
-    (_PUSH_SUB_PREFIX,        "push-subscription",     ShroudPage._ipc_push_sub,    True),
-    (_CLIP_PREFIX,            "clipboard",             ShroudPage._ipc_clipboard,   False),
-)
 
 
 class ShroudWebView(QWebEngineView):

@@ -63,7 +63,7 @@ class FakeMW:
 @pytest.fixture
 def page_and_mw():
     """Build a stand-in 'page' whose attribute surface matches what handlers touch."""
-    from browser.webview import ShroudPage
+    from browser import webview_ipc
 
     mw = FakeMW()
     mw._bg_activity = FakeMW._BG(mw)
@@ -74,9 +74,7 @@ def page_and_mw():
         url=lambda: types.SimpleNamespace(toString=lambda: "https://x"),
         _get_main_window=lambda: mw,
     )
-    # _dispatch_ipc is an instance method on ShroudPage; bind it to our
-    # stub so it picks up _view_ref / _get_main_window from the stub.
-    page._dispatch_ipc = ShroudPage._dispatch_ipc.__get__(page, type(page))
+    page._dispatch_ipc = lambda msg: webview_ipc.dispatch(page, msg)
     return page, mw
 
 
