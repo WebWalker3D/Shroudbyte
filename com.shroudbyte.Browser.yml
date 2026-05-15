@@ -13,13 +13,25 @@ finish-args:
   - --filesystem=xdg-download
   - --talk-name=org.freedesktop.secrets
   - --talk-name=org.freedesktop.Notifications
-  - --env=QTWEBENGINE_DISABLE_SANDBOX=1
+  # NOTE: Chromium's internal sandbox is intentionally left ENABLED.
+  # An earlier revision set QTWEBENGINE_DISABLE_SANDBOX=1 here for
+  # performance, but that would make any WebEngine RCE a full Flatpak-
+  # sandbox escape (network, sockets, xdg-download). On modern Flatpak
+  # (>=1.12) bwrap supports the user namespaces that Chromium's
+  # sandbox needs, so the nested sandbox should work out of the box.
+  # If you hit "Failed to move to new namespace" on a very old host,
+  # uncomment the line below and accept the weakened security posture.
+  # - --env=QTWEBENGINE_DISABLE_SANDBOX=1
 
 modules:
   - name: shroudbyte
     buildsystem: simple
     build-commands:
       - pip3 install --prefix=/app --no-deps .
+      - install -Dm644 shroudbyte-icon.svg
+          /app/share/icons/hicolor/scalable/apps/com.shroudbyte.Browser.svg
+      - install -Dm644 shroudbyte.desktop
+          /app/share/applications/com.shroudbyte.Browser.desktop
     sources:
       - type: dir
         path: .
