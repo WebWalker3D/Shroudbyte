@@ -66,6 +66,7 @@ def _show_crash_dialog(report: str):
         from PyQt6.QtWidgets import QApplication, QMessageBox
         from PyQt6.QtCore import QUrl
         from PyQt6.QtGui import QDesktopServices
+        from .i18n import _
 
         # If there's no QApplication yet, we can't show a dialog.
         app = QApplication.instance()
@@ -73,22 +74,24 @@ def _show_crash_dialog(report: str):
             return
 
         box = QMessageBox()
-        box.setWindowTitle("Shroudbyte — Crash Report")
+        box.setWindowTitle(_("Shroudbyte — Crash Report"))
         box.setIcon(QMessageBox.Icon.Critical)
-        box.setText("Shroudbyte encountered an unexpected error and needs to close.")
-        box.setInformativeText(
-            f"Details have been saved to:\n{CRASH_LOG}\n\n"
+        box.setText(_(
+            "Shroudbyte encountered an unexpected error and needs to close."
+        ))
+        box.setInformativeText(_(
+            "Details have been saved to:\n%(path)s\n\n"
             "Shroudbyte never uploads crash data. If you'd like to share "
             "this report, use 'Copy to clipboard' and paste it into a "
             "GitHub issue yourself."
-        )
+        ) % {"path": str(CRASH_LOG)})
         box.setDetailedText(report)
         close_btn = box.addButton(QMessageBox.StandardButton.Close)
         copy_btn = box.addButton(
-            "Copy to clipboard", QMessageBox.ButtonRole.ActionRole
+            _("Copy to clipboard"), QMessageBox.ButtonRole.ActionRole
         )
         open_btn = box.addButton(
-            "Open log folder", QMessageBox.ButtonRole.ActionRole
+            _("Open log folder"), QMessageBox.ButtonRole.ActionRole
         )
         box.setDefaultButton(close_btn)
 
@@ -191,28 +194,29 @@ def prompt_after_unclean_shutdown() -> str:
     """
     try:
         from PyQt6.QtWidgets import QApplication, QMessageBox
+        from .i18n import _
 
         if QApplication.instance() is None:
             return "restore"
 
         box = QMessageBox()
-        box.setWindowTitle("Shroudbyte — Recover from crash?")
+        box.setWindowTitle(_("Shroudbyte — Recover from crash?"))
         box.setIcon(QMessageBox.Icon.Warning)
-        box.setText(
+        box.setText(_(
             "Shroudbyte didn't close cleanly last time."
-        )
-        box.setInformativeText(
+        ))
+        box.setInformativeText(_(
             "Restore your previous tabs, or start with a fresh session?\n\n"
-            f"Crash log: {CRASH_LOG}"
-        )
+            "Crash log: %(path)s"
+        ) % {"path": str(CRASH_LOG)})
         restore_btn = box.addButton(
-            "Restore previous tabs", QMessageBox.ButtonRole.AcceptRole
+            _("Restore previous tabs"), QMessageBox.ButtonRole.AcceptRole
         )
         fresh_btn = box.addButton(
-            "Start fresh", QMessageBox.ButtonRole.DestructiveRole
+            _("Start fresh"), QMessageBox.ButtonRole.DestructiveRole
         )
         view_btn = box.addButton(
-            "View crash log", QMessageBox.ButtonRole.ActionRole
+            _("View crash log"), QMessageBox.ButtonRole.ActionRole
         )
         box.setDefaultButton(restore_btn)
         box.exec()

@@ -6,3 +6,6 @@ __pycache__/
 dist/
 build/
 CLAUDE.md
+
+# i18n: only commit translated .po/.mo files, not the generated template
+locale/shroudbyte.pot
