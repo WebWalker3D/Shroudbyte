@@ -1,6 +1,8 @@
 """SQLite database backend for high-traffic storage (history, screen time, etc.)."""
 
 import json
+import logging
+import shutil
 import sqlite3
 import threading
 import time
@@ -8,6 +10,8 @@ from pathlib import Path
 
 from . import storage as _storage  # for DATA_DIR
 
+
+logger = logging.getLogger("shroudbyte.db")
 
 _SCHEMA_VERSION = 3
 
@@ -63,6 +67,19 @@ CREATE TABLE IF NOT EXISTS site_settings (
 """
 
 
+# ---------------------------------------------------------------------------
+# Per-version migrations. Add a function here when bumping _SCHEMA_VERSION;
+# the new schema goes into _SCHEMA_SQL above (CREATE IF NOT EXISTS only) and
+# this function performs the ALTER/data-rewrite for existing DBs.
+# ---------------------------------------------------------------------------
+
+_MIGRATIONS: dict[int, "callable"] = {
+    # Versions 1-3 are the schema as it exists in _SCHEMA_SQL — no data
+    # transformations needed for users on these versions. Bare version
+    # bumps without code mean "schema is identical, just record progress."
+}
+
+
 class Database:
     """Thread-safe SQLite database for the browser."""
 
@@ -93,10 +110,30 @@ class Database:
             "SELECT MAX(version) as v FROM migrations"
         ).fetchone()
         current = row["v"] if row and row["v"] else 0
-        if current < _SCHEMA_VERSION:
+        if current >= _SCHEMA_VERSION:
+            return
+        # Back up the DB file before running any version-to-version migration so
+        # a failed upgrade can be recovered by hand. Only back up when there is
+        # a real upgrade to perform (not on first-init where current == 0 and
+        # the schema was just created empty).
+        if current > 0 and self._path.exists():
+            backup = self._path.with_suffix(
+                f".db.bak-v{current}-{int(time.time())}"
+            )
+            try:
+                shutil.copy2(self._path, backup)
+                logger.info("Backed up DB to %s before migration", backup)
+            except OSError as e:
+                logger.error("Failed to back up DB before migration: %s", e)
+                raise
+        for version in range(current + 1, _SCHEMA_VERSION + 1):
+            migrator = _MIGRATIONS.get(version)
+            if migrator is not None:
+                logger.info("Running DB migration to version %d", version)
+                migrator(conn)
             conn.execute(
                 "INSERT OR REPLACE INTO migrations (version) VALUES (?)",
-                (_SCHEMA_VERSION,),
+                (version,),
             )
             conn.commit()
 
@@ -417,8 +454,8 @@ class Database:
                         )
                     conn.commit()
                 hist_path.rename(hist_path.with_suffix(".json.migrated"))
-            except Exception:
-                pass  # Don't block startup on migration failure
+            except Exception as e:
+                logger.error("history.json migration failed: %s", e, exc_info=True)
 
         # Screen time
         st_path = data_dir / "screen_time.json"
@@ -436,8 +473,8 @@ class Database:
                             """, (domain, date_str, seconds))
                     conn.commit()
                 st_path.rename(st_path.with_suffix(".json.migrated"))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("screen_time.json migration failed: %s", e, exc_info=True)
 
         # Scroll positions
         sp_path = data_dir / "scroll_positions.json"
@@ -454,8 +491,8 @@ class Database:
                         """, (url, pos, time.time()))
                     conn.commit()
                 sp_path.rename(sp_path.with_suffix(".json.migrated"))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("scroll_positions.json migration failed: %s", e, exc_info=True)
 
         # Form drafts
         fd_path = data_dir / "form_drafts.json"
@@ -473,8 +510,8 @@ class Database:
                               draft.get("saved", time.time())))
                     conn.commit()
                 fd_path.rename(fd_path.with_suffix(".json.migrated"))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("form_drafts.json migration failed: %s", e, exc_info=True)
 
 
 # Singleton instance

@@ -233,3 +233,66 @@ class TestMigration:
         assert draft["fields"]["name"] == "Bob"
         assert not (tmp_data_dir / "form_drafts.json").exists()
         db.close()
+
+
+class TestSchemaMigrationFramework:
+    """Tests for the per-version migration runner in Database._apply_schema."""
+
+    def test_fresh_db_records_current_version(self, tmp_path):
+        from browser import db as db_module
+        d = Database(db_path=tmp_path / "fresh.db")
+        d._connect()
+        conn = d._conn
+        row = conn.execute("SELECT MAX(version) v FROM migrations").fetchone()
+        assert row["v"] == db_module._SCHEMA_VERSION
+        d.close()
+
+    def test_existing_older_db_is_upgraded_and_backed_up(self, tmp_path, monkeypatch):
+        from browser import db as db_module
+        path = tmp_path / "old.db"
+        d = Database(db_path=path)
+        d._connect()
+        conn = d._conn
+        # Roll back to v1 so the runner has work to do, then close.
+        conn.execute("DELETE FROM migrations")
+        conn.execute("INSERT INTO migrations (version) VALUES (1)")
+        conn.commit()
+        d.close()
+
+        ran = []
+        monkeypatch.setitem(db_module._MIGRATIONS, 2, lambda c: ran.append(2))
+        monkeypatch.setitem(db_module._MIGRATIONS, 3, lambda c: ran.append(3))
+
+        d2 = Database(db_path=path)
+        d2._connect()
+        try:
+            row = d2._conn.execute(
+                "SELECT MAX(version) v FROM migrations"
+            ).fetchone()
+            assert row["v"] == db_module._SCHEMA_VERSION
+            assert ran == [2, 3]
+            # A backup file should now exist alongside the DB.
+            backups = list(tmp_path.glob("old.db.bak-v1-*"))
+            assert backups, "expected a v1 backup file to be created"
+        finally:
+            d2.close()
+
+    def test_migration_failure_propagates(self, tmp_path, monkeypatch):
+        from browser import db as db_module
+        path = tmp_path / "bad.db"
+        d = Database(db_path=path)
+        d._connect()
+        d._conn.execute("DELETE FROM migrations")
+        d._conn.execute("INSERT INTO migrations (version) VALUES (1)")
+        d._conn.commit()
+        d.close()
+
+        def boom(_conn):
+            raise RuntimeError("migration exploded")
+
+        monkeypatch.setitem(db_module._MIGRATIONS, 2, boom)
+
+        d2 = Database(db_path=path)
+        with pytest.raises(RuntimeError, match="migration exploded"):
+            d2._connect()
+        d2.close()
