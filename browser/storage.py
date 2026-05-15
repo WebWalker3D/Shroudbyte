@@ -96,6 +96,61 @@ def update_bookmark(url, title=None, folder=None, tags=None):
     save_bookmarks(bm)
 
 
+def render_netscape_bookmarks(bookmarks: list[dict]) -> str:
+    """Render a bookmark list back into Netscape HTML, preserving folders.
+
+    Each bookmark's ``folder`` field is treated as a forward-slash-joined
+    path. Bookmarks with empty/missing folder land at the top level.
+    """
+    import html as _html
+    import time as _time
+
+    # Build a nested tree: {"_items": [...], "<folder_name>": {...}}.
+    Tree = dict
+    root: Tree = {"_items": []}
+
+    def _ensure_path(parts: list[str]) -> Tree:
+        node = root
+        for part in parts:
+            if part not in node:
+                node[part] = {"_items": []}
+            node = node[part]
+        return node
+
+    for bm in bookmarks:
+        folder = (bm.get("folder") or "").strip("/")
+        parts = [p for p in folder.split("/") if p] if folder else []
+        node = _ensure_path(parts)
+        node["_items"].append(bm)
+
+    out: list[str] = [
+        "<!DOCTYPE NETSCAPE-Bookmark-file-1>",
+        '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">',
+        "<TITLE>Bookmarks</TITLE>",
+        "<H1>Bookmarks</H1>",
+        "<DL><p>",
+    ]
+
+    def _emit(node: Tree, depth: int):
+        indent = "    " * depth
+        for bm in node["_items"]:
+            ts = int(bm.get("added", _time.time()))
+            title = _html.escape(bm.get("title", ""))
+            url = _html.escape(bm.get("url", ""))
+            out.append(f'{indent}<DT><A HREF="{url}" ADD_DATE="{ts}">{title}</A>')
+        for key, child in node.items():
+            if key == "_items":
+                continue
+            out.append(f"{indent}<DT><H3>{_html.escape(key)}</H3>")
+            out.append(f"{indent}<DL><p>")
+            _emit(child, depth + 1)
+            out.append(f"{indent}</DL><p>")
+
+    _emit(root, 1)
+    out.append("</DL><p>")
+    return "\n".join(out)
+
+
 def parse_netscape_bookmarks(content: str) -> list[dict]:
     """Parse Netscape bookmark HTML, preserving folder nesting.
 

@@ -319,3 +319,48 @@ class TestNetscapeBookmarkParse:
         assert entries[0]["title"] == "A & B"
         assert entries[0]["folder"] == "Tom & Jerry"
         assert entries[0]["url"] == "https://example.com/?x=1&y=2"
+
+
+class TestNetscapeBookmarkRender:
+    def test_round_trip_preserves_folders(self, tmp_data_dir):
+        original = [
+            {"title": "Top", "url": "https://top.com",
+             "folder": "", "added": 1700000000},
+            {"title": "W1", "url": "https://w1.com",
+             "folder": "Work", "added": 1700000001},
+            {"title": "R1", "url": "https://r1.com",
+             "folder": "Work/Research", "added": 1700000002},
+            {"title": "Personal-A", "url": "https://a.com",
+             "folder": "Personal", "added": 1700000003},
+        ]
+        html = storage.render_netscape_bookmarks(original)
+        parsed = storage.parse_netscape_bookmarks(html)
+        # Sort by URL for stable comparison; ordering across folders is
+        # not part of the contract, but each URL should keep its folder.
+        round_tripped = {p["url"]: p["folder"] for p in parsed}
+        expected = {b["url"]: b["folder"] for b in original}
+        assert round_tripped == expected
+
+    def test_flat_list_emits_no_h3(self, tmp_data_dir):
+        bookmarks = [
+            {"title": "A", "url": "https://a.com", "folder": "", "added": 0},
+            {"title": "B", "url": "https://b.com", "folder": "", "added": 0},
+        ]
+        html = storage.render_netscape_bookmarks(bookmarks)
+        assert "<H3>" not in html
+        assert "https://a.com" in html and "https://b.com" in html
+
+    def test_html_entities_escaped(self, tmp_data_dir):
+        bookmarks = [{
+            "title": "A & B",
+            "url": "https://x.com/?q=1&y=2",
+            "folder": "Tom & Jerry",
+            "added": 0,
+        }]
+        html = storage.render_netscape_bookmarks(bookmarks)
+        assert "&amp;" in html
+        # And the round trip should decode it back correctly.
+        [parsed] = storage.parse_netscape_bookmarks(html)
+        assert parsed["title"] == "A & B"
+        assert parsed["url"] == "https://x.com/?q=1&y=2"
+        assert parsed["folder"] == "Tom & Jerry"

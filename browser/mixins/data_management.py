@@ -225,21 +225,8 @@ class DataManagementMixin:
         if not path:
             return
         bookmarks = storage.load_bookmarks()
-        lines = [
-            '<!DOCTYPE NETSCAPE-Bookmark-file-1>',
-            '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">',
-            '<TITLE>Bookmarks</TITLE>',
-            '<H1>Bookmarks</H1>',
-            '<DL><p>',
-        ]
-        for bm in bookmarks:
-            ts = int(bm.get("added", time.time()))
-            title = html_mod.escape(bm["title"])
-            url = html_mod.escape(bm["url"])
-            lines.append(f'    <DT><A HREF="{url}" ADD_DATE="{ts}">{title}</A>')
-        lines.append('</DL><p>')
         with open(path, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(lines))
+            f.write(storage.render_netscape_bookmarks(bookmarks))
         self._status.showMessage(f"Exported {len(bookmarks)} bookmarks", 3000)
 
     def _import_bookmarks(self):
