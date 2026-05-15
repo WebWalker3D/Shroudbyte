@@ -63,6 +63,7 @@ _PAGES = {
     "sessions": "Sessions",
     "about": "About Shroudbyte",
     "shortcuts": "Keyboard Shortcuts",
+    "crashes": "Crash Log",
 }
 
 
@@ -116,6 +117,8 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
             html = self._page_about()
         elif host == "shortcuts":
             html = self._page_shortcuts()
+        elif host == "crashes":
+            html = self._page_crashes()
         else:
             html = self._page_error(url.toString())
 
@@ -3444,6 +3447,82 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
 
         return self._wrap("Keyboard Shortcuts", "shortcuts", content,
                           extra_css=extra_css)
+
+    def _page_crashes(self):
+        """Render the local crash log so users can read it in the browser."""
+        from . import crashhandler
+        path = crashhandler.CRASH_LOG
+        if not path.exists():
+            body = (
+                '<div class="info-card empty">'
+                'No crashes recorded. Shroudbyte writes to '
+                f'<code>{html_mod.escape(str(path))}</code> when an '
+                'unhandled exception occurs.'
+                '</div>'
+            )
+        else:
+            try:
+                raw = path.read_text(encoding="utf-8", errors="replace")
+            except OSError as e:
+                raw = f"(could not read crash log: {e})"
+            # Split into individual crash blocks for readability. The
+            # crashhandler delimits each crash with "--- Crash at <ts> ---".
+            blocks = []
+            current: list[str] = []
+            for line in raw.splitlines():
+                if line.startswith("--- Crash at ") and current:
+                    blocks.append("\n".join(current))
+                    current = []
+                current.append(line)
+            if current:
+                blocks.append("\n".join(current))
+            # Most recent first.
+            blocks.reverse()
+            if not blocks:
+                body = '<div class="info-card empty">Log file is empty.</div>'
+            else:
+                body_parts = []
+                for i, block in enumerate(blocks[:50]):
+                    # First line is the "--- Crash at <ts> ---" header if present.
+                    lines = block.splitlines()
+                    header = lines[0] if lines else "(crash)"
+                    body_parts.append(
+                        f'<details class="crash" {"open" if i == 0 else ""}>'
+                        f'<summary>{html_mod.escape(header)}</summary>'
+                        f'<pre>{html_mod.escape(block)}</pre>'
+                        f'</details>'
+                    )
+                body = "\n".join(body_parts)
+
+        content = (
+            f'<div class="section-desc">'
+            f'Local crash log at <code>{html_mod.escape(str(path))}</code>. '
+            f'Never uploaded; use Copy / Open Folder from the crash dialog '
+            f'to share excerpts manually.'
+            f'</div>'
+            f'{body}'
+        )
+
+        extra_css = f"""
+  .empty {{ color: {TEXT_DIM}; padding: 18px; }}
+  .crash {{
+    background: {BG_CARD}; border: 1px solid {BORDER};
+    border-radius: 10px; margin-bottom: 12px; overflow: hidden;
+  }}
+  .crash summary {{
+    cursor: pointer; padding: 12px 16px; font-family: monospace;
+    font-size: 12px; color: {TEXT_DIM};
+  }}
+  .crash[open] summary {{ border-bottom: 1px solid {BORDER}; color: {TEXT}; }}
+  .crash pre {{
+    margin: 0; padding: 14px 16px;
+    background: {BG_DARK}; color: {TEXT};
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+  }}
+  code {{ font-family: monospace; color: {ACCENT}; }}
+"""
+        return self._wrap("Crash Log", "crashes", content, extra_css=extra_css)
 
     def _page_error(self, url_str):
         safe_url = html_mod.escape(url_str)
