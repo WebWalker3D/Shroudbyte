@@ -212,8 +212,14 @@ def main():
         from PyQt6.QtGui import QPalette
         from . import style
 
-        dark = _settings.get("dark_mode", True)
-        style.set_dark_mode(dark)
+        # Theme: "dark" (default) / "light" / "high_contrast". Keep
+        # back-compat with the older dark_mode bool setting.
+        theme = _settings.get(
+            "theme",
+            "dark" if _settings.get("dark_mode", True) else "light",
+        )
+        style.set_theme(theme)
+        dark = style.is_dark_mode()
 
         palette = QPalette()
         if dark:

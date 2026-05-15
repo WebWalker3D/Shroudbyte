@@ -489,6 +489,36 @@ class MainWindow(
             self._profile.setHttpUserAgent(ua)
 
     # ------------------------------------------------------------------
+    # Drag-and-drop onto the tab bar
+    # ------------------------------------------------------------------
+
+    def eventFilter(self, obj, event):
+        """Open URLs dropped on the tab bar as new tabs."""
+        from PyQt6.QtCore import QEvent as _QEvent
+        et = event.type()
+        if obj is self._tabs.tabBar() and et in (
+            _QEvent.Type.DragEnter,
+            _QEvent.Type.DragMove,
+        ):
+            md = event.mimeData()
+            if md.hasUrls() or md.hasText():
+                event.acceptProposedAction()
+                return True
+        elif obj is self._tabs.tabBar() and et == _QEvent.Type.Drop:
+            md = event.mimeData()
+            urls: list[str] = []
+            if md.hasUrls():
+                urls = [u.toString() for u in md.urls() if u.toString()]
+            elif md.hasText():
+                # Whitespace-separated URLs (or a single one).
+                urls = [s for s in md.text().split() if s.strip()]
+            for url in urls:
+                self.add_new_tab(QUrl(url))
+            event.acceptProposedAction()
+            return True
+        return super().eventFilter(obj, event)
+
+    # ------------------------------------------------------------------
     # UI construction
     # ------------------------------------------------------------------
 
@@ -606,6 +636,12 @@ class MainWindow(
         self._tabs.setElideMode(Qt.TextElideMode.ElideRight)
         self._tabs.tabCloseRequested.connect(self._close_tab)
         self._tabs.currentChanged.connect(self._tab_changed)
+
+        # Accept drops of URLs/text onto the tab bar — opens each as a
+        # new tab, the same way Firefox/Chrome handle "drag a link here".
+        bar = self._tabs.tabBar()
+        bar.setAcceptDrops(True)
+        bar.installEventFilter(self)
 
         # Right-click context menu on tabs
         self._tabs.tabBar().setContextMenuPolicy(

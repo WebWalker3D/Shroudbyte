@@ -29,7 +29,7 @@ class SettingsMixin:
         if action == "save":
             s = data.get("settings", {})
             for key in (
-                "dark_mode", "wallpaper",
+                "dark_mode", "theme", "wallpaper",
                 "search_engine", "enable_javascript", "enable_adblock",
                 "default_zoom", "user_agent", "https_only", "do_not_track",
                 "restore_session", "strip_tracking", "fingerprint_resistance",
@@ -123,9 +123,13 @@ class SettingsMixin:
         )
 
     def _apply_theme(self):
-        """Switch the UI between dark and light mode."""
-        dark = self._settings.get("dark_mode", True)
-        style.set_dark_mode(dark)
+        """Switch the UI between dark, light, and high-contrast palettes."""
+        theme = self._settings.get(
+            "theme",
+            "dark" if self._settings.get("dark_mode", True) else "light",
+        )
+        style.set_theme(theme)
+        dark = style.is_dark_mode()
 
         # Qt widget stylesheets
         self.setStyleSheet(style.GLOBAL_STYLESHEET)

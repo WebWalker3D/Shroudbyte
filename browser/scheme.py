@@ -999,11 +999,18 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
       <div class="section">
         <div class="section-title">Appearance</div>
         <div class="row">
-          <div class="row-label">Dark mode
-            <div class="row-hint">Use a dark colour scheme for the browser UI and internal pages</div>
+          <div class="row-label">Theme
+            <div class="row-hint">High contrast uses pure black/white with saturated focus colors for accessibility</div>
           </div>
-          <label class="toggle"><input type="checkbox" id="dark_mode"
-            {_chk('dark_mode', True)}><span class="slider"></span></label>
+          <select id="theme" style="flex:none">
+            <option value="dark"          {('selected' if settings.get('theme', 'dark' if settings.get('dark_mode', True) else 'light') == 'dark' else '')}>Dark</option>
+            <option value="light"         {('selected' if settings.get('theme', 'dark' if settings.get('dark_mode', True) else 'light') == 'light' else '')}>Light</option>
+            <option value="high_contrast" {('selected' if settings.get('theme', 'dark' if settings.get('dark_mode', True) else 'light') == 'high_contrast' else '')}>High contrast</option>
+          </select>
+        </div>
+        <div class="row" style="display:none">
+          <!-- dark_mode is kept hidden for back-compat; the theme select drives the real choice -->
+          <input type="checkbox" id="dark_mode" {_chk('dark_mode', True)}>
         </div>
         <div class="row">
           <div class="row-label">New tab wallpaper
@@ -1357,6 +1364,7 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
     function saveSettings() {{
       var s = {{
         dark_mode: getVal('dark_mode'),
+        theme: getVal('theme'),
         wallpaper: getVal('wallpaper'),
         search_engine: getVal('search_engine'),
         enable_javascript: getVal('enable_javascript'),

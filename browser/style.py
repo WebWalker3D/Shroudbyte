@@ -43,6 +43,33 @@ _LIGHT = {
     "ACCENT_ALPHA":  "rgba(184, 122, 90, 0.08)",
 }
 
+# WCAG-AAA-leaning palette: pure black/white, saturated focus colors,
+# heavy borders so every interactive element has a visible boundary.
+_HIGH_CONTRAST = {
+    "BG_DARK":       "#000000",
+    "BG_MID":        "#000000",
+    "BG_CARD":       "#0a0a0a",
+    "BG_HOVER":      "#1f1f1f",
+    "BG_ACTIVE":     "#333333",
+    "BORDER":        "#ffffff",
+    "BORDER_FOCUS":  "#ffff00",
+    "ACCENT":        "#ffff00",
+    "ACCENT_HOVER":  "#ffea00",
+    "ACCENT_TEXT":   "#ffff00",
+    "TEXT":          "#ffffff",
+    "TEXT_DIM":      "#e0e0e0",
+    "TEXT_FAINT":    "#bdbdbd",
+    "GREEN":         "#00ff7f",
+    "RED":           "#ff5252",
+    "YELLOW":        "#ffd600",
+    "TAB_HOVER_BG":  "#1f1f1f",
+    "ACCENT_ALPHA":  "rgba(255, 255, 0, 0.18)",
+}
+
+
+# Theme can be "dark", "light", or "high_contrast". _is_dark is kept as
+# a back-compat alias for older call sites that just check truthiness.
+_theme = "dark"
 _is_dark = True
 
 # ── Module-level colour exports (updated by set_dark_mode) ──────
@@ -72,15 +99,37 @@ def is_dark_mode():
     return _is_dark
 
 
-def set_dark_mode(enabled):
-    """Switch palette and rebuild every stylesheet string in this module."""
-    global _is_dark
-    _is_dark = enabled
-    palette = _DARK if enabled else _LIGHT
+def get_theme() -> str:
+    """Return the active theme name: 'dark', 'light', or 'high_contrast'."""
+    return _theme
+
+
+_PALETTES = {
+    "dark":          _DARK,
+    "light":         _LIGHT,
+    "high_contrast": _HIGH_CONTRAST,
+}
+
+
+def set_theme(name: str):
+    """Switch palette by name and rebuild every stylesheet string."""
+    global _theme, _is_dark
+    palette = _PALETTES.get(name)
+    if palette is None:
+        # Unknown theme — fall back to dark rather than break.
+        name = "dark"
+        palette = _DARK
+    _theme = name
+    _is_dark = name != "light"  # high-contrast counts as a dark-ish theme
     g = globals()
     for key, val in palette.items():
         g[key] = val
     _rebuild()
+
+
+def set_dark_mode(enabled):
+    """Back-compat: legacy bool API for callers that haven't migrated."""
+    set_theme("dark" if enabled else "light")
 
 
 # ── Stylesheet builders (read current module globals) ────────────
