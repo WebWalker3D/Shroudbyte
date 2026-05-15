@@ -20,7 +20,9 @@ from . import storage
 
 def _warc_date() -> str:
     """Return current UTC timestamp in WARC-Date format."""
-    return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.datetime.now(datetime.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
 
 
 def _warc_record(record_type: str, target_uri: str, payload: bytes,
