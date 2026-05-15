@@ -43,6 +43,7 @@ class SettingsMixin:
                 "spellcheck_enabled", "permission_ttl_days",
                 "tab_hibernate_minutes",
                 "check_for_updates",
+                "vertical_tabs",
             ):
                 if key in s:
                     self._settings[key] = s[key]
@@ -184,6 +185,14 @@ class SettingsMixin:
         """Apply saved settings to running browser state."""
         # Theme
         self._apply_theme()
+
+        # Tab bar orientation
+        from PyQt6.QtWidgets import QTabWidget
+        self._tabs.setTabPosition(
+            QTabWidget.TabPosition.West
+            if self._settings.get("vertical_tabs", False)
+            else QTabWidget.TabPosition.North
+        )
 
         # Update DNS proxy if running
         if self._dns_proxy is not None:

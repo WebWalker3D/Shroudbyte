@@ -135,3 +135,27 @@ class TestCrossLinkedNavigation:
         html = handler._page_error("shroud://typo")
         # Helpful error page links back to known pages.
         assert "shroud://newtab" in html or "shroud://settings" in html
+
+
+class TestVerticalTabsToggle:
+    """The Appearance section exposes a checkbox that flips the tab bar
+    orientation. We can't test the live QTabWidget here, but we can
+    verify the settings page round-trips the toggle and that the UI
+    actually contains the control."""
+
+    def test_settings_page_exposes_toggle(self, handler):
+        html = handler._page_settings()
+        # The toggle is wired by id="vertical_tabs"; the JS save handler
+        # reads it back out via getVal('vertical_tabs').
+        assert 'id="vertical_tabs"' in html
+        assert "getVal('vertical_tabs')" in html
+
+    def test_setting_off_by_default_reflected_in_ui(self, handler):
+        # No setting -> checkbox is unchecked.
+        html = handler._page_settings()
+        # The _chk() helper emits "checked" only when the value is truthy.
+        # Look for the input line and confirm the checked attribute is absent.
+        import re
+        m = re.search(r'<input[^>]*id="vertical_tabs"[^>]*>', html)
+        assert m is not None
+        assert "checked" not in m.group(0)

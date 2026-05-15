@@ -1026,6 +1026,13 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
             value="{html_mod.escape(settings.get('wallpaper', ''))}"
             placeholder="/home/user/wallpaper.jpg">
         </div>
+        <div class="row">
+          <div class="row-label">Vertical tabs
+            <div class="row-hint">Mount the tab bar along the left edge instead of the top</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="vertical_tabs"
+            {_chk('vertical_tabs', False)}><span class="slider"></span></label>
+        </div>
       </div>
 
       <div class="section">
@@ -1398,7 +1405,8 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         spellcheck_enabled: getVal('spellcheck_enabled'),
         vault_auto_lock_minutes: getVal('vault_auto_lock_minutes'),
         tab_hibernate_minutes: getVal('tab_hibernate_minutes'),
-        check_for_updates: getVal('check_for_updates')
+        check_for_updates: getVal('check_for_updates'),
+        vertical_tabs: getVal('vertical_tabs')
       }};
       console.log('__SHROUD_SETTINGS__:' + JSON.stringify({{
         action: 'save', settings: s

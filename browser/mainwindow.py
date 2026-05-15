@@ -641,6 +641,10 @@ class MainWindow(
         self._tabs.setElideMode(Qt.TextElideMode.ElideRight)
         self._tabs.tabCloseRequested.connect(self._close_tab)
         self._tabs.currentChanged.connect(self._tab_changed)
+        # Vertical tabs: optional side-mounted tab bar. The settings UI
+        # exposes this as a toggle under Appearance.
+        if self._settings.get("vertical_tabs", False):
+            self._tabs.setTabPosition(QTabWidget.TabPosition.West)
 
         # Accept drops of URLs/text onto the tab bar — opens each as a
         # new tab, the same way Firefox/Chrome handle "drag a link here".
