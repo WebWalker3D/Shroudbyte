@@ -1,8 +1,11 @@
 """Custom WebEngineView and WebEnginePage with context menus, HTTPS-only, and popup support."""
 
 import json
+import logging
 import ssl
 import urllib.request
+
+logger = logging.getLogger("shroudbyte.webview")
 
 from PyQt6.QtCore import Qt, QUrl, QTimer
 from PyQt6.QtGui import QAction
@@ -63,7 +66,7 @@ class ShroudPage(QWebEnginePage):
                     view = self._view_ref
                     QTimer.singleShot(2000, lambda: mw._harvest_pending_creds(view))
             except Exception:
-                pass
+                logger.exception("Failed to handle credential capture IPC")
             return
         if msg == _PW_FOUND_ALERT:
             mw = self._get_main_window()
@@ -85,7 +88,7 @@ class ShroudPage(QWebEnginePage):
                     if mw and hasattr(mw, "_handle_link_hover"):
                         mw._handle_link_hover(href, self._view_ref)
             except Exception:
-                pass
+                logger.exception("Failed to handle link-hover IPC")
             return
         if message.startswith(_PRIVACY_ACTION_PREFIX):
             try:
@@ -95,7 +98,7 @@ class ShroudPage(QWebEnginePage):
                 if mw and hasattr(mw, "_handle_privacy_action"):
                     mw._handle_privacy_action(data)
             except Exception:
-                pass
+                logger.exception("Failed to handle privacy IPC")
             return
         if message.startswith(_WATCH_ACTION_PREFIX):
             try:
@@ -105,7 +108,7 @@ class ShroudPage(QWebEnginePage):
                 if mw and hasattr(mw, "_handle_watch_action"):
                     mw._handle_watch_action(data)
             except Exception:
-                pass
+                logger.exception("Failed to handle page-watch IPC")
             return
         if message.startswith(_SETTINGS_ACTION_PREFIX):
             try:
@@ -115,7 +118,7 @@ class ShroudPage(QWebEnginePage):
                 if mw and hasattr(mw, "_handle_settings_action"):
                     mw._handle_settings_action(data, self._view_ref)
             except Exception:
-                pass
+                logger.exception("Failed to handle settings IPC")
             return
         if message.startswith(_PAGE_ACT_PREFIX):
             try:
@@ -125,7 +128,7 @@ class ShroudPage(QWebEnginePage):
                 if mw and hasattr(mw, "_handle_page_action"):
                     mw._handle_page_action(data)
             except Exception:
-                pass
+                logger.exception("Failed to handle page-action IPC")
             return
         if message.startswith(_PERM_LEDGER_PREFIX):
             try:
@@ -135,7 +138,7 @@ class ShroudPage(QWebEnginePage):
                 if mw and hasattr(mw, "_handle_perm_ledger_action"):
                     mw._handle_perm_ledger_action(data)
             except Exception:
-                pass
+                logger.exception("Failed to handle permission-ledger IPC")
             return
         if message.startswith(_FORM_DRAFT_PREFIX):
             try:
@@ -145,7 +148,7 @@ class ShroudPage(QWebEnginePage):
                 if mw and hasattr(mw, "_handle_form_draft"):
                     mw._handle_form_draft(data)
             except Exception:
-                pass
+                logger.exception("Failed to handle form-draft IPC")
             return
         if message.startswith(_CLIP_PREFIX):
             text = message[len(_CLIP_PREFIX):]
@@ -163,7 +166,7 @@ class ShroudPage(QWebEnginePage):
                 if mw and hasattr(mw, "_handle_pwa"):
                     mw._handle_pwa(data)
             except Exception:
-                pass
+                logger.exception("Failed to handle PWA IPC")
             return
         if message.startswith(_SW_REGISTER_PREFIX):
             try:
@@ -174,7 +177,7 @@ class ShroudPage(QWebEnginePage):
                     mw._bg_activity.register_service_worker(
                         data.get("host", ""), data.get("scope", ""))
             except Exception:
-                pass
+                logger.exception("Failed to handle service-worker register IPC")
             return
         if message.startswith(_PUSH_SUB_PREFIX):
             try:
@@ -185,7 +188,7 @@ class ShroudPage(QWebEnginePage):
                     mw._bg_activity.register_push_subscription(
                         data.get("host", ""), data.get("endpoint", ""))
             except Exception:
-                pass
+                logger.exception("Failed to handle push-subscription IPC")
             return
         super().javaScriptConsoleMessage(level, message, lineNumber, sourceID)
 
