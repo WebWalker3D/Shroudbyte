@@ -263,3 +263,59 @@ class TestJsonCache:
         storage.load_settings()
         storage.invalidate_cache()
         assert storage._json_cache == {}
+
+
+class TestNetscapeBookmarkParse:
+    """Folder nesting must survive the Netscape HTML round-trip."""
+
+    def test_flat(self, tmp_data_dir):
+        html = '''
+<DL><p>
+  <DT><A HREF="https://a.com">A</A>
+  <DT><A HREF="https://b.com">B</A>
+</DL>
+'''
+        entries = storage.parse_netscape_bookmarks(html)
+        assert [(e["url"], e["folder"]) for e in entries] == [
+            ("https://a.com", ""),
+            ("https://b.com", ""),
+        ]
+
+    def test_nested_folders(self, tmp_data_dir):
+        html = '''
+<DL><p>
+  <DT><H3>Work</H3>
+  <DL><p>
+    <DT><A HREF="https://w1.com">W1</A>
+    <DT><H3>Research</H3>
+    <DL><p>
+      <DT><A HREF="https://r1.com">R1</A>
+    </DL><p>
+    <DT><A HREF="https://w2.com">W2</A>
+  </DL><p>
+  <DT><A HREF="https://top.com">Top</A>
+</DL>
+'''
+        entries = storage.parse_netscape_bookmarks(html)
+        got = [(e["url"], e["folder"]) for e in entries]
+        assert got == [
+            ("https://w1.com", "Work"),
+            ("https://r1.com", "Work/Research"),
+            ("https://w2.com", "Work"),
+            ("https://top.com", ""),
+        ]
+
+    def test_html_entities_in_titles_and_folders(self, tmp_data_dir):
+        html = '''
+<DL><p>
+  <DT><H3>Tom &amp; Jerry</H3>
+  <DL><p>
+    <DT><A HREF="https://example.com/?x=1&amp;y=2">A &amp; B</A>
+  </DL>
+</DL>
+'''
+        entries = storage.parse_netscape_bookmarks(html)
+        assert len(entries) == 1
+        assert entries[0]["title"] == "A & B"
+        assert entries[0]["folder"] == "Tom & Jerry"
+        assert entries[0]["url"] == "https://example.com/?x=1&y=2"

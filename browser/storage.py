@@ -96,6 +96,38 @@ def update_bookmark(url, title=None, folder=None, tags=None):
     save_bookmarks(bm)
 
 
+def parse_netscape_bookmarks(content: str) -> list[dict]:
+    """Parse Netscape bookmark HTML, preserving folder nesting.
+
+    Returns a list of {title, url, folder} dicts where folder is a
+    forward-slash-joined path (empty string for top-level entries).
+    """
+    import html as _html
+    import re as _re
+    token_pattern = _re.compile(
+        r'<H3[^>]*>([^<]*)</H3>'
+        r'|<A\s+HREF="([^"]+)"[^>]*>([^<]*)</A>'
+        r'|</DL>',
+        _re.IGNORECASE,
+    )
+    folder_stack: list[str] = []
+    results: list[dict] = []
+    for m in token_pattern.finditer(content):
+        folder_name, url, title = m.group(1), m.group(2), m.group(3)
+        if folder_name is not None:
+            folder_stack.append(_html.unescape(folder_name.strip()))
+        elif url is not None:
+            results.append({
+                "title": _html.unescape((title or "").strip()),
+                "url": _html.unescape(url.strip()),
+                "folder": "/".join(folder_stack),
+            })
+        else:
+            if folder_stack:
+                folder_stack.pop()
+    return results
+
+
 def get_bookmark_folders() -> list[str]:
     """Return sorted list of unique folder paths."""
     folders = set()
