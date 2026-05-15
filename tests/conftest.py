@@ -22,4 +22,17 @@ def tmp_data_dir(monkeypatch, tmp_path):
 
     monkeypatch.setattr(storage, "DATA_DIR", tmp_path)
     storage._json_cache.clear() if hasattr(storage, "_json_cache") else None
+
+    # Reset the get_db() singleton so each test gets a fresh DB pointed
+    # at the per-test data dir. Without this, the first test to touch
+    # db creates a connection bound to its tmp dir and every subsequent
+    # test inherits it.
+    try:
+        from browser import db as _db_module
+        if _db_module._db is not None:
+            _db_module._db.close()
+            _db_module._db = None
+    except ImportError:
+        pass
+
     return tmp_path
