@@ -318,7 +318,20 @@ class MainWindow(
 
         # Window setup
         self.setWindowTitle(__app_name__)
-        self.resize(1280, 900)
+        self._restore_window_state_mode = "normal"
+        ws = storage.load_window_state() if not private_mode else {}
+        if ws:
+            w = int(ws.get("width", 1280))
+            h = int(ws.get("height", 900))
+            if "x" in ws and "y" in ws:
+                self.setGeometry(int(ws["x"]), int(ws["y"]), w, h)
+            else:
+                self.resize(w, h)
+            mode = ws.get("state", "normal")
+            if mode in ("maximized", "fullscreen"):
+                self._restore_window_state_mode = mode
+        else:
+            self.resize(1280, 900)
         self.setStyleSheet(style.GLOBAL_STYLESHEET)
         self._setup_ui()
         self._setup_menus()

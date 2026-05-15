@@ -245,7 +245,13 @@ def main():
         else:
             # Normal browser
             window = MainWindow(dns_proxy=_proxy_instance)
-            window.show()
+            _mode = getattr(window, "_restore_window_state_mode", "normal")
+            if _mode == "maximized":
+                window.showMaximized()
+            elif _mode == "fullscreen":
+                window.showFullScreen()
+            else:
+                window.show()
 
             # Kill the splash now that the main window is visible.
             if splash_proc is not None:

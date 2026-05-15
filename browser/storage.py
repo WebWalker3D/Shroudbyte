@@ -288,6 +288,20 @@ def clear_session():
 
 
 # ---------------------------------------------------------------------------
+# Window state (geometry + maximized/fullscreen) for restore on next launch
+# ---------------------------------------------------------------------------
+
+def save_window_state(state: dict):
+    """Persist window state dict {state, x, y, width, height}."""
+    _save_json("window_state.json", state)
+
+
+def load_window_state() -> dict:
+    """Return saved window state dict, or {} if none."""
+    return _load_json("window_state.json", {})
+
+
+# ---------------------------------------------------------------------------
 # Cookie auto-delete whitelist
 # ---------------------------------------------------------------------------
 

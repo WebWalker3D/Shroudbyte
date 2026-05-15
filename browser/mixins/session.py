@@ -110,6 +110,23 @@ class SessionMixin:
 
     def closeEvent(self, event):
         """Save session on close."""
+        # Persist window state (size + maximized/fullscreen) so the next
+        # launch restores how the user left it.
+        if not self._private_mode:
+            if self.isFullScreen():
+                mode = "fullscreen"
+            elif self.isMaximized():
+                mode = "maximized"
+            else:
+                mode = "normal"
+            geo = self.normalGeometry() if mode != "normal" else self.geometry()
+            storage.save_window_state({
+                "state": mode,
+                "x": geo.x(),
+                "y": geo.y(),
+                "width": geo.width(),
+                "height": geo.height(),
+            })
         if self._settings.get("restore_session", True) and not self._private_mode:
             tabs = []
             for i in range(self._tabs.count()):
