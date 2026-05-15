@@ -76,121 +76,92 @@ class ShroudPage(QWebEnginePage):
             return
         super().javaScriptAlert(securityOrigin, msg)
 
+    # IPC dispatch table — see _dispatch_ipc below. Each entry maps a
+    # console-message prefix to (label, handler-callable). The handler
+    # receives (page, main_window, payload) where payload is the parsed
+    # JSON (or raw string for clipboard).
+    @staticmethod
+    def _ipc_link_hover(page, mw, data):
+        href = data.get("href", "")
+        if href and hasattr(mw, "_handle_link_hover"):
+            mw._handle_link_hover(href, page._view_ref)
+
+    @staticmethod
+    def _ipc_privacy(page, mw, data):
+        if hasattr(mw, "_handle_privacy_action"):
+            mw._handle_privacy_action(data)
+
+    @staticmethod
+    def _ipc_watch(page, mw, data):
+        if hasattr(mw, "_handle_watch_action"):
+            mw._handle_watch_action(data)
+
+    @staticmethod
+    def _ipc_settings(page, mw, data):
+        if hasattr(mw, "_handle_settings_action"):
+            mw._handle_settings_action(data, page._view_ref)
+
+    @staticmethod
+    def _ipc_page_action(page, mw, data):
+        if hasattr(mw, "_handle_page_action"):
+            mw._handle_page_action(data)
+
+    @staticmethod
+    def _ipc_perm_ledger(page, mw, data):
+        if hasattr(mw, "_handle_perm_ledger_action"):
+            mw._handle_perm_ledger_action(data)
+
+    @staticmethod
+    def _ipc_form_draft(page, mw, data):
+        if hasattr(mw, "_handle_form_draft"):
+            mw._handle_form_draft(data)
+
+    @staticmethod
+    def _ipc_pwa(page, mw, data):
+        if hasattr(mw, "_handle_pwa"):
+            mw._handle_pwa(data)
+
+    @staticmethod
+    def _ipc_sw_register(page, mw, data):
+        if hasattr(mw, "_bg_activity"):
+            mw._bg_activity.register_service_worker(
+                data.get("host", ""), data.get("scope", ""))
+
+    @staticmethod
+    def _ipc_push_sub(page, mw, data):
+        if hasattr(mw, "_bg_activity"):
+            mw._bg_activity.register_push_subscription(
+                data.get("host", ""), data.get("endpoint", ""))
+
+    @staticmethod
+    def _ipc_clipboard(page, mw, text):
+        # Clipboard payload is raw text, not JSON.
+        if text and hasattr(mw, "_clipboard_history"):
+            url = page.url().toString() if page._view_ref else ""
+            mw._clipboard_history.record(text, url)
+
     def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
-        """Intercept link-hover messages from injected Link Intelligence JS."""
-        if message.startswith(_LINK_HOVER_PREFIX):
-            try:
-                import json as _json
-                data = _json.loads(message[len(_LINK_HOVER_PREFIX):])
-                href = data.get("href", "")
-                if href:
-                    mw = self._get_main_window()
-                    if mw and hasattr(mw, "_handle_link_hover"):
-                        mw._handle_link_hover(href, self._view_ref)
-            except Exception:
-                logger.exception("Failed to handle link-hover IPC")
-            return
-        if message.startswith(_PRIVACY_ACTION_PREFIX):
-            try:
-                import json as _json
-                data = _json.loads(message[len(_PRIVACY_ACTION_PREFIX):])
-                mw = self._get_main_window()
-                if mw and hasattr(mw, "_handle_privacy_action"):
-                    mw._handle_privacy_action(data)
-            except Exception:
-                logger.exception("Failed to handle privacy IPC")
-            return
-        if message.startswith(_WATCH_ACTION_PREFIX):
-            try:
-                import json as _json
-                data = _json.loads(message[len(_WATCH_ACTION_PREFIX):])
-                mw = self._get_main_window()
-                if mw and hasattr(mw, "_handle_watch_action"):
-                    mw._handle_watch_action(data)
-            except Exception:
-                logger.exception("Failed to handle page-watch IPC")
-            return
-        if message.startswith(_SETTINGS_ACTION_PREFIX):
-            try:
-                import json as _json
-                data = _json.loads(message[len(_SETTINGS_ACTION_PREFIX):])
-                mw = self._get_main_window()
-                if mw and hasattr(mw, "_handle_settings_action"):
-                    mw._handle_settings_action(data, self._view_ref)
-            except Exception:
-                logger.exception("Failed to handle settings IPC")
-            return
-        if message.startswith(_PAGE_ACT_PREFIX):
-            try:
-                import json as _json
-                data = _json.loads(message[len(_PAGE_ACT_PREFIX):])
-                mw = self._get_main_window()
-                if mw and hasattr(mw, "_handle_page_action"):
-                    mw._handle_page_action(data)
-            except Exception:
-                logger.exception("Failed to handle page-action IPC")
-            return
-        if message.startswith(_PERM_LEDGER_PREFIX):
-            try:
-                import json as _json
-                data = _json.loads(message[len(_PERM_LEDGER_PREFIX):])
-                mw = self._get_main_window()
-                if mw and hasattr(mw, "_handle_perm_ledger_action"):
-                    mw._handle_perm_ledger_action(data)
-            except Exception:
-                logger.exception("Failed to handle permission-ledger IPC")
-            return
-        if message.startswith(_FORM_DRAFT_PREFIX):
-            try:
-                import json as _json
-                data = _json.loads(message[len(_FORM_DRAFT_PREFIX):])
-                mw = self._get_main_window()
-                if mw and hasattr(mw, "_handle_form_draft"):
-                    mw._handle_form_draft(data)
-            except Exception:
-                logger.exception("Failed to handle form-draft IPC")
-            return
-        if message.startswith(_CLIP_PREFIX):
-            text = message[len(_CLIP_PREFIX):]
-            if text:
-                mw = self._get_main_window()
-                if mw and hasattr(mw, "_clipboard_history"):
-                    url = self.url().toString() if self._view_ref else ""
-                    mw._clipboard_history.record(text, url)
-            return
-        if message.startswith(_PWA_PREFIX):
-            try:
-                import json as _json
-                data = _json.loads(message[len(_PWA_PREFIX):])
-                mw = self._get_main_window()
-                if mw and hasattr(mw, "_handle_pwa"):
-                    mw._handle_pwa(data)
-            except Exception:
-                logger.exception("Failed to handle PWA IPC")
-            return
-        if message.startswith(_SW_REGISTER_PREFIX):
-            try:
-                import json as _json
-                data = _json.loads(message[len(_SW_REGISTER_PREFIX):])
-                mw = self._get_main_window()
-                if mw and hasattr(mw, "_bg_activity"):
-                    mw._bg_activity.register_service_worker(
-                        data.get("host", ""), data.get("scope", ""))
-            except Exception:
-                logger.exception("Failed to handle service-worker register IPC")
-            return
-        if message.startswith(_PUSH_SUB_PREFIX):
-            try:
-                import json as _json
-                data = _json.loads(message[len(_PUSH_SUB_PREFIX):])
-                mw = self._get_main_window()
-                if mw and hasattr(mw, "_bg_activity"):
-                    mw._bg_activity.register_push_subscription(
-                        data.get("host", ""), data.get("endpoint", ""))
-            except Exception:
-                logger.exception("Failed to handle push-subscription IPC")
+        """Dispatch injected-JS console messages to their Python handlers."""
+        if self._dispatch_ipc(message):
             return
         super().javaScriptConsoleMessage(level, message, lineNumber, sourceID)
+
+    def _dispatch_ipc(self, message: str) -> bool:
+        """Try each registered prefix; return True if one matched."""
+        for prefix, label, handler, parses_json in _IPC_HANDLERS:
+            if not message.startswith(prefix):
+                continue
+            payload = message[len(prefix):]
+            try:
+                if parses_json:
+                    payload = json.loads(payload)
+                mw = self._get_main_window()
+                if mw is not None:
+                    handler(self, mw, payload)
+            except Exception:
+                logger.exception("Failed to handle %s IPC", label)
+            return True
+        return False
 
     def createWindow(self, window_type):
         view = self._view_ref
@@ -388,6 +359,23 @@ class ShroudPage(QWebEnginePage):
         if result and is_main_frame:
             self._pending_probe_url = None
         return result
+
+
+# IPC handler table — order doesn't matter (prefixes are unique). Each
+# row: (prefix, label-for-logging, handler-fn, parses_json_payload).
+_IPC_HANDLERS = (
+    (_LINK_HOVER_PREFIX,      "link-hover",            ShroudPage._ipc_link_hover,  True),
+    (_PRIVACY_ACTION_PREFIX,  "privacy",               ShroudPage._ipc_privacy,     True),
+    (_WATCH_ACTION_PREFIX,    "page-watch",            ShroudPage._ipc_watch,       True),
+    (_SETTINGS_ACTION_PREFIX, "settings",              ShroudPage._ipc_settings,    True),
+    (_PAGE_ACT_PREFIX,        "page-action",           ShroudPage._ipc_page_action, True),
+    (_PERM_LEDGER_PREFIX,     "permission-ledger",     ShroudPage._ipc_perm_ledger, True),
+    (_FORM_DRAFT_PREFIX,      "form-draft",            ShroudPage._ipc_form_draft,  True),
+    (_PWA_PREFIX,             "PWA",                   ShroudPage._ipc_pwa,         True),
+    (_SW_REGISTER_PREFIX,     "service-worker",        ShroudPage._ipc_sw_register, True),
+    (_PUSH_SUB_PREFIX,        "push-subscription",     ShroudPage._ipc_push_sub,    True),
+    (_CLIP_PREFIX,            "clipboard",             ShroudPage._ipc_clipboard,   False),
+)
 
 
 class ShroudWebView(QWebEngineView):
