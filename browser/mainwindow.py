@@ -489,6 +489,19 @@ class MainWindow(
         self._navbar.setIconSize(QSize(18, 18))
         self.addToolBar(self._navbar)
 
+        # --- Bookmark bar (hidden by default; toggle in Bookmarks menu) ---
+        self._bookmark_bar = QToolBar("Bookmarks Bar")
+        self._bookmark_bar.setMovable(False)
+        self._bookmark_bar.setIconSize(QSize(16, 16))
+        self._bookmark_bar.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextOnly
+        )
+        self.addToolBarBreak()
+        self.addToolBar(self._bookmark_bar)
+        self._bookmark_bar.setVisible(
+            bool(self._settings.get("show_bookmark_bar", False))
+        )
+
         self._back_btn = QPushButton("\u25C0")
         self._back_btn.setToolTip("Back")
         self._back_btn.setStyleSheet(style.NAV_BTN_STYLE)
@@ -700,6 +713,9 @@ class MainWindow(
         bm_menu = menubar.addMenu("&Bookmarks")
         bm_menu.addAction(self._make_action("Bookmark This Page", self._toggle_bookmark, "Ctrl+D"))
         bm_menu.addAction(self._make_action("Show All Bookmarks", self._show_bookmarks, "Ctrl+Shift+B"))
+        bm_menu.addAction(self._make_action(
+            "Toggle Bookmarks Bar", self._toggle_bookmark_bar, "Ctrl+Alt+B"
+        ))
         bm_menu.addSeparator()
         bm_menu.addAction(self._make_action("Import Bookmarks\u2026", self._import_bookmarks))
         bm_menu.addAction(self._make_action("Export Bookmarks\u2026", self._export_bookmarks))

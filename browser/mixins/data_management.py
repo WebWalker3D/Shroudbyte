@@ -249,14 +249,30 @@ class DataManagementMixin:
             return
         with open(path, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
-        pattern = r'<A\s+HREF="([^"]+)"[^>]*>([^<]*)</A>'
-        matches = re.findall(pattern, content, re.IGNORECASE)
+        # Netscape bookmark format uses <DL>/<DT><H3>Folder</H3><DL>...</DL>
+        # nesting. Walk the file linearly: H3 pushes a folder, </DL> pops.
+        token_pattern = re.compile(
+            r'<H3[^>]*>([^<]*)</H3>'              # group 1: folder name
+            r'|<A\s+HREF="([^"]+)"[^>]*>([^<]*)</A>'  # 2,3: url, title
+            r'|</DL>',
+            re.IGNORECASE,
+        )
+        folder_stack: list[str] = []
         count = 0
-        for url, title in matches:
-            title = html_mod.unescape(title.strip())
-            url = html_mod.unescape(url.strip())
-            if url and storage.add_bookmark(title or url, url):
-                count += 1
+        for m in token_pattern.finditer(content):
+            folder_name, url, title = m.group(1), m.group(2), m.group(3)
+            if folder_name is not None:
+                folder_stack.append(html_mod.unescape(folder_name.strip()))
+            elif url is not None:
+                title = html_mod.unescape((title or "").strip())
+                url = html_mod.unescape(url.strip())
+                folder_path = "/".join(folder_stack)
+                if url and storage.add_bookmark(title or url, url, folder=folder_path):
+                    count += 1
+            else:
+                # </DL> — pop the most recent folder if any.
+                if folder_stack:
+                    folder_stack.pop()
         self._populate_bookmarks_menu()
         self._update_bookmark_btn(self._current_view().url())
         self._status.showMessage(f"Imported {count} new bookmarks", 3000)

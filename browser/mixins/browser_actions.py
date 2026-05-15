@@ -243,10 +243,35 @@ class BrowserActionsMixin:
         view = self._current_view()
         if not view:
             return
+        # Toggle: if a devtools dock is already open for this window, close it.
+        existing = getattr(self, "_devtools_dock", None)
+        if existing is not None and existing.isVisible():
+            existing.close()
+            self._devtools_dock = None
+            return
+
+        from PyQt6.QtWidgets import QDockWidget
         devtools = ShroudWebView(self._profile, tab_widget=self)
         view.page().setDevToolsPage(devtools.page())
-        i = self._tabs.addTab(devtools, "DevTools")
-        self._tabs.setCurrentIndex(i)
+
+        dock = QDockWidget("DevTools", self)
+        dock.setAllowedAreas(
+            Qt.DockWidgetArea.RightDockWidgetArea
+            | Qt.DockWidgetArea.BottomDockWidgetArea
+        )
+        dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetClosable
+            | QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        )
+        dock.setWidget(devtools)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+        dock.resize(500, dock.height())
+        self._devtools_dock = dock
+
+        def _cleanup():
+            self._devtools_dock = None
+        dock.destroyed.connect(_cleanup)
 
     def _view_source(self):
         view = self._current_view()

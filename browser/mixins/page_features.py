@@ -430,11 +430,38 @@ class PageFeaturesMixin:
         for a in actions[6:]:
             self._bookmarks_menu.removeAction(a)
 
-        for bm in storage.load_bookmarks()[:20]:
+        bookmarks = storage.load_bookmarks()
+        for bm in bookmarks[:20]:
             label = bm["title"][:40] or bm["url"][:40]
             action = self._bookmarks_menu.addAction(label)
             action.setData(bm["url"])
             action.triggered.connect(partial(self._open_bookmark, bm["url"]))
+
+        self._populate_bookmark_bar(bookmarks)
+
+    def _populate_bookmark_bar(self, bookmarks=None):
+        """Refresh the always-visible bookmark toolbar from storage."""
+        bar = getattr(self, "_bookmark_bar", None)
+        if bar is None:
+            return
+        bar.clear()
+        if bookmarks is None:
+            bookmarks = storage.load_bookmarks()
+        for bm in bookmarks[:30]:
+            label = (bm["title"] or bm["url"])[:24]
+            act = bar.addAction(label)
+            act.setToolTip(bm["url"])
+            act.triggered.connect(partial(self._open_bookmark, bm["url"]))
+
+    def _toggle_bookmark_bar(self):
+        """Show/hide the bookmark toolbar and persist the choice."""
+        bar = getattr(self, "_bookmark_bar", None)
+        if bar is None:
+            return
+        new_state = not bar.isVisible()
+        bar.setVisible(new_state)
+        self._settings["show_bookmark_bar"] = new_state
+        storage.save_settings(self._settings)
 
     def _open_bookmark(self, url):
         self._current_view().load(QUrl(url))
