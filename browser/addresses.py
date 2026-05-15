@@ -5,25 +5,42 @@ HTML autocomplete fields (name, organization, street, postal code,
 etc.). The injected fill JavaScript uses each input's
 ``autocomplete=""`` attribute to decide which saved value to write.
 
-Storage is plain JSON in DATA_DIR for now. Addresses are PII but not
-credentials; tightening this to a vault-encrypted file is tracked as
-follow-up work — see [[feature-address-autofill-vault]].
+Storage transparently encrypts the data file with the password vault's
+key when the vault is unlocked, and falls back to plain JSON when no
+key is available. The on-disk file is auto-migrated between the two
+formats on the first save under a new key state — see
+:func:`set_encryption_key`.
+
+File layout (``addresses.dat``):
+
+* Plain JSON: first byte is ``'['`` (a JSON array).
+* Encrypted: first byte is :data:`crypto.VAULT_VERSION` (currently 2),
+  followed by an AES-256-GCM blob produced by :func:`crypto.encrypt_aead`.
 """
 
 from __future__ import annotations
 
+import json
+import logging
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
 
-from . import storage
+from . import crypto, storage
 
 
-_ADDRESS_FILE = "addresses.json"
+logger = logging.getLogger("shroudbyte.addresses")
+
+# Single file for both formats. The on-disk content distinguishes itself
+# by its first byte; see module docstring.
+_ADDRESS_FILE = "addresses.dat"
+
+# Legacy plain-JSON file used by the v1 MVP. Auto-migrated on first read.
+_LEGACY_ADDRESS_FILE = "addresses.json"
 
 
 # HTML autocomplete tokens we know how to round-trip. The keys here match
-# what `<input autocomplete="...">` uses, per the WHATWG spec.
+# what ``<input autocomplete="...">`` uses, per the WHATWG spec.
 # https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#autofill
 AUTOCOMPLETE_FIELDS = (
     "name",            # full name
@@ -43,6 +60,22 @@ AUTOCOMPLETE_FIELDS = (
 )
 
 
+# Module-level encryption key. MainWindow flips this when the password
+# vault unlocks / locks. None means "no vault available — plain JSON".
+_active_key: bytes | None = None
+
+
+def set_encryption_key(key: bytes | None):
+    """Tell the address book whether to encrypt on the next save.
+
+    Passing ``None`` reverts to plain JSON. Passing a 32-byte AES-256 key
+    causes the next :func:`_save_all` to produce an encrypted file, and
+    subsequent reads to require the same key.
+    """
+    global _active_key
+    _active_key = key
+
+
 @dataclass
 class Address:
     """A saved address profile."""
@@ -54,13 +87,94 @@ class Address:
     updated_at: float = 0.0
 
 
+# ---------------------------------------------------------------------------
+# On-disk format
+# ---------------------------------------------------------------------------
+
+def _data_path():
+    return storage.DATA_DIR / _ADDRESS_FILE
+
+
+def _legacy_path():
+    return storage.DATA_DIR / _LEGACY_ADDRESS_FILE
+
+
 def _load_all() -> list[dict]:
-    return storage._load_json(_ADDRESS_FILE, [])
+    """Read, decode (decrypt if needed), and return the entry list."""
+    path = _data_path()
+    legacy = _legacy_path()
+
+    # First-run migration: pick up any plain JSON file written by the
+    # MVP version of this module and convert to the new container.
+    if not path.exists() and legacy.exists():
+        try:
+            entries = json.loads(legacy.read_text(encoding="utf-8"))
+            _save_all(entries)
+            legacy.unlink()
+            return entries
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning("Could not migrate %s: %s", legacy, e)
+
+    if not path.exists():
+        return []
+
+    blob = path.read_bytes()
+    if not blob:
+        return []
+
+    # First byte tells us the format. Encrypted blobs start with
+    # crypto.VAULT_VERSION; plain JSON arrays start with '['.
+    if blob[0] == crypto.VAULT_VERSION:
+        if _active_key is None:
+            # Vault is locked — we can't decrypt. Return empty so the
+            # UI gracefully shows "no addresses available" rather than
+            # crashing; the on-disk data stays intact.
+            logger.info(
+                "addresses.dat is encrypted but no key set; "
+                "returning empty list"
+            )
+            return []
+        try:
+            plaintext = crypto.decrypt_aead(blob, _active_key)
+        except Exception as e:
+            logger.error(
+                "Failed to decrypt addresses.dat (%s); quarantining file",
+                e,
+                exc_info=True,
+            )
+            # Don't silently let the next _save_all overwrite a corrupt
+            # but possibly recoverable file. Move it aside.
+            try:
+                path.rename(path.with_name(
+                    f"{_ADDRESS_FILE}.corrupted-{int(time.time())}"
+                ))
+            except OSError:
+                pass
+            return []
+        return json.loads(plaintext.decode("utf-8"))
+
+    # Plain JSON path.
+    try:
+        return json.loads(blob.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        logger.error("addresses.dat is malformed plain JSON: %s", e)
+        return []
 
 
 def _save_all(entries: list[dict]):
-    storage._save_json(_ADDRESS_FILE, entries)
+    """Write entries back out, encrypting if a key is set."""
+    storage.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    path = _data_path()
+    payload = json.dumps(entries, separators=(",", ":")).encode("utf-8")
+    if _active_key is not None:
+        path.write_bytes(crypto.encrypt_aead(payload, _active_key))
+    else:
+        path.write_bytes(payload)
 
+
+# ---------------------------------------------------------------------------
+# CRUD API
+# ---------------------------------------------------------------------------
 
 def list_addresses() -> list[Address]:
     """Return every saved address, most recently updated first."""

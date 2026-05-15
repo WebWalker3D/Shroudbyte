@@ -30,7 +30,18 @@ class PasswordMixin:
         """Lock the password vault after idle timeout."""
         if self._vault.is_unlocked:
             self._vault.lock()
+            self._sync_addresses_key()
             self._status.showMessage("Password vault locked (idle timeout)", 4000)
+
+    def _sync_addresses_key(self):
+        """Propagate the current vault key to the addresses module.
+
+        The address book uses the vault's AES key transparently when
+        the vault is unlocked, falling back to plain JSON when locked.
+        """
+        from browser import addresses
+        key = self._vault._key if self._vault.is_unlocked else None
+        addresses.set_encryption_key(key)
 
     def event(self, event):
         """Reset vault lock timer on user interaction."""
@@ -50,6 +61,7 @@ class PasswordMixin:
         # Keyring backend — try auto-unlock, no dialog needed
         if self._settings.get("vault_backend") == "keyring":
             if self._vault.unlock_with_keyring():
+                self._sync_addresses_key()
                 return True
             QMessageBox.warning(
                 self, "Password Vault",
@@ -64,6 +76,7 @@ class PasswordMixin:
                 self._vault.setup_with_keyring()
                 self._settings["vault_backend"] = "keyring"
                 storage.save_settings(self._settings)
+                self._sync_addresses_key()
                 return True
             except Exception:
                 pass  # Fall through to master password dialog
@@ -77,6 +90,7 @@ class PasswordMixin:
             if dlg.chosen_backend != self._settings.get("vault_backend", "master_password"):
                 self._settings["vault_backend"] = dlg.chosen_backend
                 storage.save_settings(self._settings)
+            self._sync_addresses_key()
             return True
         return False
 

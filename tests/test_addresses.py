@@ -1,5 +1,7 @@
 """Tests for browser.addresses — saved-address CRUD."""
 
+import pytest
+
 from browser import addresses
 
 
@@ -96,3 +98,95 @@ class TestUpdate:
 
     def test_update_unknown_returns_false(self, tmp_data_dir):
         assert addresses.update_address("nope", label="x") is False
+
+
+import os
+
+from browser import crypto
+
+
+class TestEncryption:
+    """addresses.dat is plain JSON when no key is set; AES-GCM encrypted when one is."""
+
+    @pytest.fixture(autouse=True)
+    def reset_key(self):
+        addresses.set_encryption_key(None)
+        yield
+        addresses.set_encryption_key(None)
+
+    def test_plain_json_when_no_key(self, tmp_data_dir):
+        a = addresses.add_address("Home", VALID_FIELDS)
+        blob = (tmp_data_dir / "addresses.dat").read_bytes()
+        # First byte tells us it's a JSON array, not the version byte 0x02.
+        assert blob[:1] == b"["
+        assert blob[0] != crypto.VAULT_VERSION
+        assert a.id.encode() in blob
+
+    def test_encrypted_when_key_set(self, tmp_data_dir):
+        key = os.urandom(32)
+        addresses.set_encryption_key(key)
+        a = addresses.add_address("Home", VALID_FIELDS)
+        blob = (tmp_data_dir / "addresses.dat").read_bytes()
+        # First byte is the AES-GCM version sentinel.
+        assert blob[0] == crypto.VAULT_VERSION
+        # Plaintext should be unrecoverable from the on-disk bytes.
+        assert a.id.encode() not in blob
+        # But the round-trip with the same key still works.
+        assert addresses.get_address(a.id) is not None
+
+    def test_locking_hides_entries(self, tmp_data_dir):
+        key = os.urandom(32)
+        addresses.set_encryption_key(key)
+        a = addresses.add_address("Home", VALID_FIELDS)
+        # "Lock" the vault — clear the module key.
+        addresses.set_encryption_key(None)
+        # Encrypted file with no key returns empty rather than raising.
+        assert addresses.list_addresses() == []
+        # Re-unlocking restores access.
+        addresses.set_encryption_key(key)
+        assert any(x.id == a.id for x in addresses.list_addresses())
+
+    def test_wrong_key_quarantines_file(self, tmp_data_dir):
+        key = os.urandom(32)
+        addresses.set_encryption_key(key)
+        addresses.add_address("Home", VALID_FIELDS)
+        # Switch to a bogus key — load should fail and rename the file
+        # aside rather than silently letting the next save clobber it.
+        addresses.set_encryption_key(os.urandom(32))
+        assert addresses.list_addresses() == []
+        assert not (tmp_data_dir / "addresses.dat").exists()
+        assert list(tmp_data_dir.glob("addresses.dat.corrupted-*"))
+
+    def test_legacy_json_migrated_on_first_read(self, tmp_data_dir):
+        # Simulate an MVP-era addresses.json sitting in the data dir.
+        import json as _json
+        legacy = tmp_data_dir / "addresses.json"
+        entries = [{
+            "id": "legacy-id",
+            "label": "OldHome",
+            "fields": {"name": "Ada"},
+            "created_at": 1.0,
+            "updated_at": 1.0,
+        }]
+        legacy.write_text(_json.dumps(entries))
+
+        addrs = addresses.list_addresses()
+        assert any(a.label == "OldHome" for a in addrs)
+        # The legacy file is consumed.
+        assert not legacy.exists()
+        # And the new container is in place.
+        assert (tmp_data_dir / "addresses.dat").exists()
+
+    def test_round_trip_after_format_switch(self, tmp_data_dir):
+        # Plain → encrypted: a save under a new key should re-encrypt.
+        a = addresses.add_address("Home", VALID_FIELDS)
+        key = os.urandom(32)
+        addresses.set_encryption_key(key)
+        # The on-disk file was plain JSON; add another address (which
+        # triggers a save) and confirm both addresses survive AND the
+        # file is now encrypted.
+        b = addresses.add_address("Work", VALID_FIELDS)
+        blob = (tmp_data_dir / "addresses.dat").read_bytes()
+        assert blob[0] == crypto.VAULT_VERSION
+        ids = {x.id for x in addresses.list_addresses()}
+        assert {a.id, b.id} == ids

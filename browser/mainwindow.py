@@ -310,6 +310,11 @@ class MainWindow(
         self._vault = PasswordVault()
         if self._settings.get("vault_backend") == "keyring":
             self._vault.unlock_with_keyring()
+        # Address book uses the vault's AES key when unlocked.
+        from browser import addresses as _addresses_mod
+        _addresses_mod.set_encryption_key(
+            self._vault._key if self._vault.is_unlocked else None
+        )
         self._password_save_bar = None
 
         # Vault auto-lock timer (resets on user interaction)
