@@ -9,6 +9,7 @@ Legacy vaults (Fernet / PBKDF2) are auto-migrated on first unlock.
 
 import base64
 import json
+import logging
 import os
 import time
 import uuid
@@ -21,6 +22,9 @@ from cryptography.hazmat.primitives import hashes
 
 from . import crypto
 from .storage import DATA_DIR, _ensure_dir
+
+
+logger = logging.getLogger("shroudbyte.passwords")
 
 SALT_FILE = "passwords.salt"
 VAULT_FILE = "passwords.enc"
@@ -142,18 +146,26 @@ class PasswordVault:
         self._load()
 
         # --- Auto-migrate to modern crypto ---
-        new_salt = os.urandom(32)
-        new_key = _derive_key(master_password, new_salt)
+        try:
+            new_salt = os.urandom(32)
+            new_key = _derive_key(master_password, new_salt)
 
-        (DATA_DIR / SALT_FILE).write_bytes(new_salt)
-        (DATA_DIR / VERIFY_FILE).write_bytes(
-            crypto.encrypt_aead(b"shroudbyte-vault", new_key)
-        )
+            (DATA_DIR / SALT_FILE).write_bytes(new_salt)
+            (DATA_DIR / VERIFY_FILE).write_bytes(
+                crypto.encrypt_aead(b"shroudbyte-vault", new_key)
+            )
 
-        self._key = new_key
-        self._fernet = None
-        self._is_modern = True
-        self._save()
+            self._key = new_key
+            self._fernet = None
+            self._is_modern = True
+            self._save()
+            logger.info("Migrated legacy Fernet/PBKDF2 vault to AES-256-GCM/Argon2id")
+        except Exception as e:
+            logger.error(
+                "Legacy vault migration failed (%s); vault remains unlocked "
+                "in legacy Fernet mode, will retry on next unlock",
+                e, exc_info=True,
+            )
         return True
 
     def lock(self):
@@ -240,7 +252,13 @@ class PasswordVault:
         try:
             f = Fernet(key_str.encode("ascii"))
             f.decrypt(verify_blob)
-        except (InvalidToken, Exception):
+        except InvalidToken:
+            return False
+        except Exception as e:
+            logger.error(
+                "Unexpected error verifying legacy keyring vault: %s",
+                e, exc_info=True,
+            )
             return False
 
         # Temporarily use Fernet to load existing entries
@@ -251,16 +269,29 @@ class PasswordVault:
         self._load()
 
         # --- Auto-migrate to modern crypto ---
-        new_key = os.urandom(32)
-        key_hex = new_key.hex()
-        if keyring_backend.store_secret("vault_fernet_key", key_hex):
-            (DATA_DIR / VERIFY_FILE).write_bytes(
-                crypto.encrypt_aead(b"shroudbyte-vault", new_key)
+        try:
+            new_key = os.urandom(32)
+            key_hex = new_key.hex()
+            if keyring_backend.store_secret("vault_fernet_key", key_hex):
+                (DATA_DIR / VERIFY_FILE).write_bytes(
+                    crypto.encrypt_aead(b"shroudbyte-vault", new_key)
+                )
+                self._key = new_key
+                self._fernet = None
+                self._is_modern = True
+                self._save()
+                logger.info("Migrated legacy keyring Fernet vault to AES-256-GCM")
+            else:
+                logger.error(
+                    "Legacy keyring vault migration: keyring write failed; "
+                    "vault remains in legacy Fernet mode"
+                )
+        except Exception as e:
+            logger.error(
+                "Legacy keyring vault migration failed (%s); vault remains "
+                "unlocked in legacy Fernet mode, will retry on next unlock",
+                e, exc_info=True,
             )
-            self._key = new_key
-            self._fernet = None
-            self._is_modern = True
-            self._save()
 
         return True
 
@@ -424,5 +455,30 @@ class PasswordVault:
                 self._entries = []
                 return
             self._entries = json.loads(data.decode("utf-8"))
-        except (InvalidToken, json.JSONDecodeError, ValueError, Exception):
+        except Exception as e:
+            # Decryption succeeded for the verify blob but failed for the
+            # vault — this is corruption, not a wrong password. Empty the
+            # in-memory list AND quarantine the file so the next _save()
+            # cannot silently overwrite the original. Without this, a
+            # single bad read destroys every saved password forever.
+            corrupt_path = vault_path.with_name(
+                f"{VAULT_FILE}.corrupted-{int(time.time())}"
+            )
+            try:
+                vault_path.rename(corrupt_path)
+                logger.error(
+                    "Password vault decryption failed (%s); quarantined to %s",
+                    e, corrupt_path, exc_info=True,
+                )
+            except OSError as rename_err:
+                logger.error(
+                    "Password vault decryption failed (%s) AND quarantine "
+                    "rename failed (%s); refusing to load to avoid data loss",
+                    e, rename_err, exc_info=True,
+                )
+                # Lock the vault to prevent _save() from running with an
+                # empty entry list and overwriting the corrupted file.
+                self._unlocked = False
+                self._key = None
+                self._fernet = None
             self._entries = []

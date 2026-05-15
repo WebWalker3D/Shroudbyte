@@ -164,3 +164,45 @@ class TestEncryptionRoundTrip:
         v2 = PasswordVault()
         assert v2.unlock("wrong") is False
         assert v2.get_all_entries() == []
+
+
+class TestVaultCorruptionRecovery:
+    """The vault file must be quarantined (not silently emptied) on decrypt failure."""
+
+    def test_corrupted_vault_is_quarantined_not_overwritten(self, tmp_data_dir):
+        # Setup a vault with one entry, then corrupt the .enc file.
+        v = PasswordVault()
+        v.setup(MASTER)
+        v.add_entry("https://a.com", "alice", "pw1")
+        v.lock()
+
+        vault_file = tmp_data_dir / "passwords.enc"
+        original_bytes = vault_file.read_bytes()
+        vault_file.write_bytes(b"this is not a valid AES-GCM blob")
+
+        # Re-unlock — the verify file is still good, so unlock succeeds,
+        # but _load() will fail to decrypt the (corrupted) vault file.
+        v2 = PasswordVault()
+        assert v2.unlock(MASTER) is True
+        assert v2.get_all_entries() == []
+
+        # The corrupted file must have been moved aside, NOT left in place
+        # to be clobbered by the next save.
+        assert not vault_file.exists(), \
+            "corrupted vault must be quarantined, not left to be overwritten"
+        quarantined = list(tmp_data_dir.glob("passwords.enc.corrupted-*"))
+        assert len(quarantined) == 1
+        assert quarantined[0].read_bytes() == b"this is not a valid AES-GCM blob"
+
+    def test_wrong_password_does_not_quarantine(self, tmp_data_dir):
+        v = PasswordVault()
+        v.setup(MASTER)
+        v.add_entry("https://a.com", "alice", "pw1")
+        v.lock()
+
+        v2 = PasswordVault()
+        assert v2.unlock("wrong-password") is False
+
+        # No quarantine on wrong password — vault file must be untouched.
+        assert (tmp_data_dir / "passwords.enc").exists()
+        assert not list(tmp_data_dir.glob("passwords.enc.corrupted-*"))
