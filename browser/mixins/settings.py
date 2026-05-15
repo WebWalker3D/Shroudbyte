@@ -42,6 +42,7 @@ class SettingsMixin:
                 "vault_auto_lock_minutes",
                 "spellcheck_enabled", "permission_ttl_days",
                 "tab_hibernate_minutes",
+                "check_for_updates",
             ):
                 if key in s:
                     self._settings[key] = s[key]

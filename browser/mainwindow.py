@@ -410,6 +410,11 @@ class MainWindow(
         # Start page watcher after startup settles
         QTimer.singleShot(10_000, self._page_watcher.start)
 
+        # Optional update check (off by default; opt-in via settings)
+        from . import updater as _updater
+        QTimer.singleShot(15_000, lambda: _updater.maybe_check_in_background(
+            self._settings))
+
         # Handle SIGTERM / SIGINT so session is saved on kill
         signal.signal(signal.SIGTERM, self._signal_handler)
         signal.signal(signal.SIGINT, self._signal_handler)

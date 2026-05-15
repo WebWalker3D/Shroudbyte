@@ -1066,6 +1066,13 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
             value="{settings.get('tab_hibernate_minutes', 0)}"
             style="width:80px;flex:none">&nbsp;min
         </div>
+        <div class="row">
+          <div class="row-label">Check for updates
+            <div class="row-hint">Once per day, ask GitHub for the latest release. Off by default; opt-in only</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="check_for_updates"
+            {_chk('check_for_updates', False)}><span class="slider"></span></label>
+        </div>
       </div>
 
       <div class="section">
@@ -1376,7 +1383,8 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         custom_dns_fallback: getVal('custom_dns_fallback'),
         spellcheck_enabled: getVal('spellcheck_enabled'),
         vault_auto_lock_minutes: getVal('vault_auto_lock_minutes'),
-        tab_hibernate_minutes: getVal('tab_hibernate_minutes')
+        tab_hibernate_minutes: getVal('tab_hibernate_minutes'),
+        check_for_updates: getVal('check_for_updates')
       }};
       console.log('__SHROUD_SETTINGS__:' + JSON.stringify({{
         action: 'save', settings: s
@@ -2708,8 +2716,30 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
             for name in _PAGES
         )
 
+        # Surface a cached update result if one is available. This only
+        # reads the cache — the actual network check is opt-in and runs
+        # in the background from MainWindow.
+        update_banner = ""
+        try:
+            from . import updater as _updater
+            _cache = _updater._load_cache()
+            _result = _cache.get("result") if _cache else None
+            if _result:
+                update_banner = (
+                    f'<div class="info-card" style="border-color:#cd8d6a">'
+                    f'<strong>Update available:</strong> '
+                    f'v{html_mod.escape(_result["latest"])} '
+                    f'(you have v{html_mod.escape(_result["current"])}) '
+                    f'&mdash; <a href="{html_mod.escape(_result["url"])}">'
+                    f'View release</a>'
+                    f'</div>'
+                )
+        except Exception:
+            pass
+
         content = f"""
     <div class="section-desc">Version {__version__}</div>
+    {update_banner}
     <div class="info-card">
       <table>
 {table_rows}
