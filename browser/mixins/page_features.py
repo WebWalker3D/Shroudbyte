@@ -685,6 +685,27 @@ class PageFeaturesMixin:
         elif action == "fill_address" and arg:
             self._fill_address_in_current_view(arg)
 
+    def _most_recent_web_view(self):
+        """Return the most recently active tab whose URL isn't shroud://.
+
+        Falls back to the first non-internal tab found, or None if every
+        open tab is an internal page.
+        """
+        # Sort tabs by _last_active desc; pick the first with a non-shroud
+        # URL. _last_active is stamped in TabMixin._tab_changed.
+        candidates = []
+        for i in range(self._tabs.count()):
+            v = self._tabs.widget(i)
+            if v is None:
+                continue
+            if v.url().scheme() == "shroud":
+                continue
+            candidates.append((getattr(v, "_last_active", 0.0), v))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda t: t[0], reverse=True)
+        return candidates[0][1]
+
     def _fill_address_chooser(self):
         """Show a quick chooser of saved addresses and fill the current tab."""
         from PyQt6.QtWidgets import QInputDialog
@@ -708,7 +729,13 @@ class PageFeaturesMixin:
 
     def _fill_address_in_current_view(self, address_id: str):
         """Inject JS into the current tab that fills any matching
-        autocomplete-tagged inputs from the saved address."""
+        autocomplete-tagged inputs from the saved address.
+
+        When invoked from a shroud:// page (e.g. the Fill button on
+        shroud://addresses itself), redirect to the most-recently-
+        used non-internal tab so we're not trying to fill our own
+        management UI.
+        """
         from browser import addresses
         addr = addresses.get_address(address_id)
         if addr is None:
@@ -717,6 +744,14 @@ class PageFeaturesMixin:
         view = self._current_view()
         if view is None:
             return
+        if view.url().scheme() == "shroud":
+            target = self._most_recent_web_view()
+            if target is None:
+                self._status.showMessage(
+                    "Open the target page in another tab first", 3000
+                )
+                return
+            view = target
         import json as _json
         # Build a single JS object literal: { "name": "...", ... }
         payload = _json.dumps(addr.fields)

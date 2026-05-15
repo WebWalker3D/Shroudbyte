@@ -3397,10 +3397,13 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
 
         content = """
     <div class="section-desc">
-      Saved addresses for form autofill. To fill a form on the current page,
-      open the management page in a tab beside it and click <em>Fill on previous tab</em>,
-      or use the toolbar &raquo; Fill address action.
-      Stored in plain JSON; do not save anything that needs to be encrypted.
+      Saved addresses for form autofill. To fill a form on a real page,
+      navigate to the form and invoke <em>Tools &raquo; Addresses &raquo; Fill Address&hellip;</em>
+      (<kbd>Ctrl+Shift+A</kbd>). The <em>Fill</em> button on each row below targets
+      the currently-visible tab, so use it only when this page is open
+      <em>next to</em> the form via split-view or a second window.
+      Addresses are encrypted with the password vault key when it is
+      unlocked, and stored as plain JSON when no vault is set up.
     </div>
 
     <div class="card" style="padding:18px;margin-bottom:18px;">
