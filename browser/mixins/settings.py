@@ -41,6 +41,7 @@ class SettingsMixin:
                 "dns_over_https", "dns_over_https_provider", "custom_dns_fallback",
                 "vault_auto_lock_minutes",
                 "spellcheck_enabled", "permission_ttl_days",
+                "tab_hibernate_minutes",
             ):
                 if key in s:
                     self._settings[key] = s[key]

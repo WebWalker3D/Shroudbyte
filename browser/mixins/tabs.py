@@ -1,3 +1,4 @@
+import time
 from functools import partial
 
 from PyQt6.QtCore import Qt, QUrl, QTimer
@@ -439,12 +440,53 @@ class TabMixin:
             if deferred:
                 view._deferred_url = None
                 view.load(QUrl(deferred))
+            view._last_active = time.time()
             self._update_url_bar(view.url())
             self._update_title(view.title())
             self._update_bookmark_btn(view.url())
             self._update_reader_btn()
             if view.url().scheme() not in ("shroud", ""):
                 self._screen_time.set_domain(view.url().host())
+
+    def _hibernate_idle_tabs(self):
+        """Discard the page content of inactive tabs to free memory.
+
+        A hibernated tab is replaced with a lightweight placeholder; its
+        URL is stashed on _deferred_url so :func:`_tab_changed` re-loads
+        it the next time the user clicks the tab.
+        """
+        minutes = int(self._settings.get("tab_hibernate_minutes", 0) or 0)
+        if minutes <= 0:
+            return
+        threshold = time.time() - minutes * 60
+        current_index = self._tabs.currentIndex()
+        for i in range(self._tabs.count()):
+            if i == current_index:
+                continue
+            view = self._tabs.widget(i)
+            if view is None:
+                continue
+            if getattr(view, "_pinned", False):
+                continue
+            if getattr(view, "_deferred_url", None):
+                continue  # already hibernated / lazy-loaded
+            last = getattr(view, "_last_active", None)
+            if last is None or last > threshold:
+                continue
+            url = view.url().toString()
+            if not url or url.startswith("shroud:"):
+                continue
+            title = view.title() or self._tabs.tabText(i)
+            view._deferred_url = url
+            view.setHtml(
+                f'<html><body style="background:#111115;color:#5c5c6b;'
+                f'display:flex;align-items:center;justify-content:center;'
+                f'height:100vh;margin:0;font-family:sans-serif;font-size:14px;">'
+                f'<div style="text-align:center">'
+                f'<div style="font-size:16px;margin-bottom:8px;">{title or url}</div>'
+                f'<div>Tab hibernated — switch to reload</div></div></body></html>',
+                QUrl("shroud://hibernated"),
+            )
 
     def _tab_url_changed(self, view, url):
         if hasattr(self, '_mark_session_dirty'):

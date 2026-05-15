@@ -402,6 +402,11 @@ class MainWindow(
         self._filterlist_timer.start(24 * 60 * 60 * 1000)
         QTimer.singleShot(5000, self._check_filterlist_freshness)
 
+        # Hibernate idle tabs to keep memory bounded; off by default.
+        self._hibernate_timer = QTimer(self)
+        self._hibernate_timer.timeout.connect(self._hibernate_idle_tabs)
+        self._hibernate_timer.start(60_000)
+
         # Start page watcher after startup settles
         QTimer.singleShot(10_000, self._page_watcher.start)
 

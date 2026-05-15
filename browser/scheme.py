@@ -1058,6 +1058,14 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
           <label class="toggle"><input type="checkbox" id="spellcheck_enabled"
             {_chk('spellcheck_enabled', True)}><span class="slider"></span></label>
         </div>
+        <div class="row">
+          <div class="row-label">Hibernate idle tabs after
+            <div class="row-hint">Free memory by discarding inactive tab content; switch to reload (0 = never)</div>
+          </div>
+          <input type="number" id="tab_hibernate_minutes" min="0" max="1440"
+            value="{settings.get('tab_hibernate_minutes', 0)}"
+            style="width:80px;flex:none">&nbsp;min
+        </div>
       </div>
 
       <div class="section">
@@ -1367,7 +1375,8 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         dns_over_https_provider: getVal('dns_over_https_provider'),
         custom_dns_fallback: getVal('custom_dns_fallback'),
         spellcheck_enabled: getVal('spellcheck_enabled'),
-        vault_auto_lock_minutes: getVal('vault_auto_lock_minutes')
+        vault_auto_lock_minutes: getVal('vault_auto_lock_minutes'),
+        tab_hibernate_minutes: getVal('tab_hibernate_minutes')
       }};
       console.log('__SHROUD_SETTINGS__:' + JSON.stringify({{
         action: 'save', settings: s
