@@ -36,8 +36,10 @@ class ProfileManager:
 
     def _load_profiles(self):
         """Load profile definitions from storage."""
-        saved = storage._load_json("profiles.json", None)
-        if saved is None:
+        # _load_json normalises a missing file to [], not None, so we
+        # treat "no entries on disk" the same as "first run" and seed.
+        saved = storage._load_json("profiles.json", [])
+        if not saved:
             saved = _DEFAULT_PROFILES
             storage._save_json("profiles.json", saved)
 
