@@ -792,6 +792,13 @@ class MainWindow(
         passwords_menu.addAction(self._make_action("Password Manager", self._show_password_manager, "Ctrl+Shift+M"))
         passwords_menu.addAction(self._make_action("Auto-fill Password", self._auto_fill_password, "Ctrl+Shift+L"))
 
+        # -- Addresses submenu --
+        addresses_menu = tools_menu.addMenu("Addresses")
+        addresses_menu.addAction(self._make_action("Manage Addresses",
+            lambda: self.add_new_tab(QUrl("shroud://addresses"))))
+        addresses_menu.addAction(self._make_action("Fill Address…",
+            self._fill_address_chooser, "Ctrl+Shift+A"))
+
         # -- Page Tools submenu --
         page_menu = tools_menu.addMenu("Page Tools")
         page_menu.addAction(self._make_action("Screenshot\u2026", self._take_screenshot, "Ctrl+Shift+E"))

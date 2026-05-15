@@ -663,6 +663,85 @@ class PageFeaturesMixin:
             if hasattr(self, "_extension_manager"):
                 self._extension_manager.disable(arg)
                 self._status.showMessage(f"Extension disabled: {arg}", 2000)
+        # Address book actions (shroud://addresses)
+        elif action == "add_address":
+            from browser import addresses
+            label = data.get("label", "")
+            fields = data.get("fields", {}) or {}
+            addresses.add_address(label, fields)
+            self._status.showMessage("Address saved", 2000)
+        elif action == "update_address" and arg:
+            from browser import addresses
+            addresses.update_address(
+                arg,
+                label=data.get("label"),
+                fields=data.get("fields"),
+            )
+            self._status.showMessage("Address updated", 2000)
+        elif action == "delete_address" and arg:
+            from browser import addresses
+            addresses.remove_address(arg)
+            self._status.showMessage("Address deleted", 2000)
+        elif action == "fill_address" and arg:
+            self._fill_address_in_current_view(arg)
+
+    def _fill_address_chooser(self):
+        """Show a quick chooser of saved addresses and fill the current tab."""
+        from PyQt6.QtWidgets import QInputDialog
+        from browser import addresses
+        all_addrs = addresses.list_addresses()
+        if not all_addrs:
+            self._status.showMessage(
+                "No saved addresses — add some at shroud://addresses", 3000
+            )
+            return
+        labels = [f"{a.label}  ({a.fields.get('name', '')})".strip()
+                  for a in all_addrs]
+        choice, ok = QInputDialog.getItem(
+            self, "Fill Address", "Pick a saved address:",
+            labels, 0, False,
+        )
+        if not ok:
+            return
+        idx = labels.index(choice)
+        self._fill_address_in_current_view(all_addrs[idx].id)
+
+    def _fill_address_in_current_view(self, address_id: str):
+        """Inject JS into the current tab that fills any matching
+        autocomplete-tagged inputs from the saved address."""
+        from browser import addresses
+        addr = addresses.get_address(address_id)
+        if addr is None:
+            self._status.showMessage("Address not found", 2000)
+            return
+        view = self._current_view()
+        if view is None:
+            return
+        import json as _json
+        # Build a single JS object literal: { "name": "...", ... }
+        payload = _json.dumps(addr.fields)
+        js = (
+            "(function(values){"
+            "  var filled = 0;"
+            "  document.querySelectorAll('input[autocomplete], textarea[autocomplete], select[autocomplete]').forEach(function(el){"
+            "    var key = el.getAttribute('autocomplete');"
+            "    if (key && values[key] != null) {"
+            "      el.focus();"
+            "      el.value = values[key];"
+            "      el.dispatchEvent(new Event('input', {bubbles:true}));"
+            "      el.dispatchEvent(new Event('change', {bubbles:true}));"
+            "      filled++;"
+            "    }"
+            "  });"
+            "  return filled;"
+            f"}})({payload});"
+        )
+        def _done(count):
+            self._status.showMessage(
+                f"Filled {int(count or 0)} fields from ‘{addr.label}’",
+                3000,
+            )
+        view.page().runJavaScript(js, _done)
 
     # ------------------------------------------------------------------
     # WARC/WACZ Capture

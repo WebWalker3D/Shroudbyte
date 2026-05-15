@@ -64,6 +64,7 @@ _PAGES = {
     "about": "About Shroudbyte",
     "shortcuts": "Keyboard Shortcuts",
     "crashes": "Crash Log",
+    "addresses": "Addresses",
 }
 
 
@@ -119,6 +120,8 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
             html = self._page_shortcuts()
         elif host == "crashes":
             html = self._page_crashes()
+        elif host == "addresses":
+            html = self._page_addresses()
         else:
             html = self._page_error(url.toString())
 
@@ -3353,6 +3356,211 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
       console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify({action:'save_session',arg:name}));
       setTimeout(function(){ location.reload(); }, 300);
     }""")
+
+    def _page_addresses(self):
+        """Generate the shroud://addresses saved-address manager page."""
+        import json as _json
+        from . import addresses
+
+        all_addrs = addresses.list_addresses()
+        # Serialize to plain dicts for the client-side JS.
+        addr_data = [
+            {"id": a.id, "label": a.label, "fields": a.fields}
+            for a in all_addrs
+        ]
+        addr_json = _json.dumps(addr_data)
+
+        # Field schema for the editor — token + human-readable label.
+        schema = [
+            ("name",            "Full name"),
+            ("given-name",      "Given (first) name"),
+            ("family-name",     "Family (last) name"),
+            ("organization",    "Organization"),
+            ("street-address",  "Street address"),
+            ("address-line2",   "Address line 2"),
+            ("address-level2",  "City"),
+            ("address-level1",  "State / region"),
+            ("postal-code",     "Postal / ZIP code"),
+            ("country",         "Country code"),
+            ("email",           "Email"),
+            ("tel",             "Phone"),
+        ]
+        schema_json = _json.dumps(schema)
+
+        content = """
+    <div class="section-desc">
+      Saved addresses for form autofill. To fill a form on the current page,
+      open the management page in a tab beside it and click <em>Fill on previous tab</em>,
+      or use the toolbar &raquo; Fill address action.
+      Stored in plain JSON; do not save anything that needs to be encrypted.
+    </div>
+
+    <div class="card" style="padding:18px;margin-bottom:18px;">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px;">Add address</div>
+      <input id="new-label" type="text" placeholder="Label (e.g. Home, Work)"
+        style="width:100%;padding:8px 12px;margin-bottom:10px;">
+      <div id="new-fields"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
+        <button class="act-btn visit" onclick="addAddress()">Save address</button>
+      </div>
+    </div>
+
+    <div class="section-desc"><span id="addrCount"></span></div>
+    <div id="addrList"></div>
+
+    <!-- Edit dialog -->
+    <div class="addr-overlay" id="editOverlay" onclick="if(event.target===this)closeEdit()">
+      <div class="addr-dialog">
+        <h3>Edit address</h3>
+        <input type="hidden" id="editId">
+        <label>Label</label>
+        <input id="editLabel" type="text">
+        <div id="editFields" style="margin-top:8px;"></div>
+        <div class="dialog-btns">
+          <button class="act-btn" onclick="closeEdit()">Cancel</button>
+          <button class="act-btn visit" onclick="saveEdit()">Save</button>
+        </div>
+      </div>
+    </div>
+"""
+
+        extra_css = f"""
+  .addr-row {{
+    display:flex; align-items:center; padding:12px 16px; gap:10px;
+  }}
+  .addr-row + .addr-row {{ border-top:1px solid {BORDER}; }}
+  .addr-row .label {{ font-weight:600; flex:0 0 160px; }}
+  .addr-row .summary {{ color:{TEXT_DIM}; font-size:12px; flex:1; }}
+  .addr-overlay {{
+    display:none; position:fixed; inset:0; z-index:200;
+    background:rgba(0,0,0,0.6);
+    justify-content:center; align-items:center;
+  }}
+  .addr-overlay.visible {{ display:flex; }}
+  .addr-dialog {{
+    background:{BG_CARD}; border:1px solid {BORDER};
+    border-radius:14px; padding:24px; width:520px; max-width:92vw;
+    max-height:88vh; overflow-y:auto;
+  }}
+  .addr-dialog h3 {{ font-size:16px; margin-bottom:14px; }}
+  .addr-dialog label {{ display:block; font-size:12px; color:{TEXT_DIM};
+    margin:10px 0 4px; }}
+  .addr-dialog input[type="text"] {{ width:100%; padding:7px 10px;
+    background:{BG_DARK}; border:1px solid {BORDER}; border-radius:6px;
+    color:{TEXT}; font-family:inherit; font-size:13px; }}
+  .dialog-btns {{ display:flex; gap:8px; justify-content:flex-end;
+    margin-top:18px; }}
+"""
+
+        extra_js = f"""
+    var ADDRESSES = {addr_json};
+    var SCHEMA = {schema_json};
+
+    function escapeHtml(s) {{
+      return String(s || '').replace(/[&<>"']/g, function(c) {{
+        return {{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[c];
+      }});
+    }}
+
+    function buildFieldInputs(containerId, values) {{
+      var c = document.getElementById(containerId);
+      c.innerHTML = '';
+      SCHEMA.forEach(function(pair) {{
+        var key = pair[0], label = pair[1];
+        var row = document.createElement('div');
+        row.innerHTML =
+          '<label>' + escapeHtml(label) +
+          ' <span style="color:#888;font-size:10px;">' + escapeHtml(key) + '</span></label>' +
+          '<input type="text" data-key="' + escapeHtml(key) + '"' +
+          ' value="' + escapeHtml((values || {{}})[key] || '') + '">';
+        c.appendChild(row);
+      }});
+    }}
+
+    function collectFields(containerId) {{
+      var values = {{}};
+      document.querySelectorAll('#' + containerId + ' input[data-key]')
+        .forEach(function(el) {{ values[el.dataset.key] = el.value; }});
+      return values;
+    }}
+
+    function pageAct(action, arg, extras) {{
+      var payload = Object.assign({{action:action, arg:arg}}, extras || {{}});
+      console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify(payload));
+    }}
+
+    function renderList() {{
+      var listEl = document.getElementById('addrList');
+      var countEl = document.getElementById('addrCount');
+      countEl.textContent = ADDRESSES.length + ' saved address' +
+        (ADDRESSES.length === 1 ? '' : 'es');
+      if (!ADDRESSES.length) {{
+        listEl.innerHTML = '<div class="empty" style="padding:20px;">No saved addresses yet.</div>';
+        return;
+      }}
+      var html = '<div class="card">';
+      ADDRESSES.forEach(function(a) {{
+        var summary = (a.fields['name'] || '') +
+          (a.fields['street-address'] ? ' \\u00b7 ' + a.fields['street-address'] : '');
+        html += '<div class="addr-row">' +
+          '<div class="label">' + escapeHtml(a.label) + '</div>' +
+          '<div class="summary">' + escapeHtml(summary) + '</div>' +
+          '<button class="act-btn visit" onclick="fillAddress(\\'' + a.id + '\\')">Fill</button>' +
+          '<button class="act-btn" onclick="openEdit(\\'' + a.id + '\\')">Edit</button>' +
+          '<button class="act-btn danger" onclick="del(\\'' + a.id + '\\')">Delete</button>' +
+          '</div>';
+      }});
+      html += '</div>';
+      listEl.innerHTML = html;
+    }}
+
+    function addAddress() {{
+      var label = document.getElementById('new-label').value.trim() || 'Untitled';
+      var fields = collectFields('new-fields');
+      pageAct('add_address', '', {{label: label, fields: fields}});
+      document.getElementById('new-label').value = '';
+      buildFieldInputs('new-fields', {{}});
+      setTimeout(function() {{ location.reload(); }}, 300);
+    }}
+
+    function del(id) {{
+      if (!confirm('Delete this address?')) return;
+      pageAct('delete_address', id);
+      setTimeout(function() {{ location.reload(); }}, 300);
+    }}
+
+    function fillAddress(id) {{
+      pageAct('fill_address', id);
+    }}
+
+    function openEdit(id) {{
+      var addr = ADDRESSES.find(function(a) {{ return a.id === id; }});
+      if (!addr) return;
+      document.getElementById('editId').value = addr.id;
+      document.getElementById('editLabel').value = addr.label;
+      buildFieldInputs('editFields', addr.fields);
+      document.getElementById('editOverlay').classList.add('visible');
+    }}
+
+    function closeEdit() {{
+      document.getElementById('editOverlay').classList.remove('visible');
+    }}
+
+    function saveEdit() {{
+      var id = document.getElementById('editId').value;
+      var label = document.getElementById('editLabel').value.trim() || 'Untitled';
+      var fields = collectFields('editFields');
+      pageAct('update_address', id, {{label: label, fields: fields}});
+      closeEdit();
+      setTimeout(function() {{ location.reload(); }}, 300);
+    }}
+
+    buildFieldInputs('new-fields', {{}});
+    renderList();
+"""
+
+        return self._wrap("Addresses", "addresses", content,
+                          extra_css=extra_css, extra_js=extra_js)
 
     def _page_shortcuts(self):
         categories = [
