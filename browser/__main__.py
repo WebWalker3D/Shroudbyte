@@ -243,8 +243,26 @@ def main():
             window = AppWindow(app_url, dns_proxy=_proxy_instance)
             window.show()
         else:
+            # If the previous launch left a running marker behind, it crashed
+            # or was force-killed. Ask the user before silently restoring
+            # whatever broken state caused the crash.
+            _crashed_last_time = _crashhandler.was_previous_run_crashed()
+            _open_log_after = False
+            if _crashed_last_time:
+                choice = _crashhandler.prompt_after_unclean_shutdown()
+                if choice == "fresh":
+                    from . import storage as _storage_mod
+                    _storage_mod.clear_session()
+                elif choice == "viewlog":
+                    _open_log_after = True
+            _crashhandler.mark_session_started()
+
             # Normal browser
             window = MainWindow(dns_proxy=_proxy_instance)
+            if _open_log_after:
+                from PyQt6.QtCore import QUrl as _QUrl
+                from PyQt6.QtGui import QDesktopServices as _QDS
+                _QDS.openUrl(_QUrl.fromLocalFile(str(_crashhandler.CRASH_LOG)))
             _mode = getattr(window, "_restore_window_state_mode", "normal")
             if _mode == "maximized":
                 window.showMaximized()
@@ -268,6 +286,11 @@ def main():
         # Shut down the DNS proxy if it was running.
         if _proxy_instance is not None:
             _proxy_instance.stop()
+
+        # Clean exit — remove the running marker so the next launch knows
+        # the previous run finished gracefully.
+        if not app_url:
+            _crashhandler.mark_session_ended()
 
         sys.exit(ret)
 
