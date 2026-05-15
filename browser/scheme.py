@@ -1051,6 +1051,25 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
           <label class="toggle"><input type="checkbox" id="remember_scroll_position"
             {_chk('remember_scroll_position', True)}><span class="slider"></span></label>
         </div>
+        <div class="row">
+          <div class="row-label">Spellcheck
+            <div class="row-hint">Underline misspelled words in form fields (requires restart)</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="spellcheck_enabled"
+            {_chk('spellcheck_enabled', True)}><span class="slider"></span></label>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Passwords</div>
+        <div class="row">
+          <div class="row-label">Auto-lock vault after
+            <div class="row-hint">Lock the password vault after this many minutes of inactivity (0 = never)</div>
+          </div>
+          <input type="number" id="vault_auto_lock_minutes" min="0" max="1440"
+            value="{settings.get('vault_auto_lock_minutes', 15)}"
+            style="width:80px;flex:none">&nbsp;min
+        </div>
       </div>
     </div>
 
@@ -1346,7 +1365,9 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         search_suggestions: getVal('search_suggestions'),
         dns_over_https: getVal('dns_over_https'),
         dns_over_https_provider: getVal('dns_over_https_provider'),
-        custom_dns_fallback: getVal('custom_dns_fallback')
+        custom_dns_fallback: getVal('custom_dns_fallback'),
+        spellcheck_enabled: getVal('spellcheck_enabled'),
+        vault_auto_lock_minutes: getVal('vault_auto_lock_minutes')
       }};
       console.log('__SHROUD_SETTINGS__:' + JSON.stringify({{
         action: 'save', settings: s

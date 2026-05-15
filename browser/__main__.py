@@ -52,7 +52,7 @@ _gpu_flags += " --enable-zero-copy"
 _gpu_flags += " --enable-features=CanvasOopRasterization"
 _gpu_flags += " --disable-gpu-compositing"
 _gpu_flags += " --allow-insecure-localhost"
-_gpu_flags += " --disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessRespectPreflightResults,Translate"
+_gpu_flags += " --disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessRespectPreflightResults"
 _gpu_flags += " --log-level=3"
 os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _gpu_flags.strip()
 

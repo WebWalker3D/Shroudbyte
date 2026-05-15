@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QFileDialog, QFrame, QCheckBox, QMessageBox, QWidget,
 )
-from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
+from PyQt6.QtPrintSupport import QPrinter, QPrintDialog, QPrintPreviewDialog
 from PyQt6.QtWebEngineCore import QWebEnginePage
 
 from browser import storage, style
@@ -55,14 +55,30 @@ class BrowserActionsMixin:
         if not view:
             return
         printer = QPrinter()
-        dialog = QPrintDialog(printer, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            def _on_print_done(success):
-                if success:
-                    self._status.showMessage("Page printed", 3000)
-                else:
-                    self._status.showMessage("Printing failed", 3000)
-            view.page().print(printer, _on_print_done)
+        preview = QPrintPreviewDialog(printer, self)
+        preview.setWindowTitle("Print Preview")
+        preview.resize(900, 800)
+
+        def _render(prn):
+            # Synchronous wrapper around the async view.print() call so the
+            # preview can rasterize before showing.
+            loop_done = {"v": False}
+            def _cb(_ok):
+                loop_done["v"] = True
+            view.page().print(prn, _cb)
+            from PyQt6.QtCore import QEventLoop, QTimer
+            loop = QEventLoop()
+            timer = QTimer()
+            timer.setInterval(50)
+            timer.timeout.connect(lambda: loop_done["v"] and loop.quit())
+            timer.start()
+            # Hard cap so a stuck render can't hang the dialog.
+            QTimer.singleShot(15000, loop.quit)
+            loop.exec()
+
+        preview.paintRequested.connect(_render)
+        if preview.exec() == QDialog.DialogCode.Accepted:
+            self._status.showMessage("Page printed", 3000)
 
     def _save_pdf(self):
         view = self._current_view()

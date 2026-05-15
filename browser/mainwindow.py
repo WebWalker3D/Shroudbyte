@@ -237,6 +237,17 @@ class MainWindow(
                 QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
             )
 
+        # Spellcheck — uses Chromium's built-in dictionary support. Language
+        # follows the system locale unless the user overrode it in settings.
+        if self._settings.get("spellcheck_enabled", True):
+            self._profile.setSpellCheckEnabled(True)
+            langs = self._settings.get("spellcheck_languages", [])
+            if not langs:
+                import locale as _locale
+                sys_lang = (_locale.getdefaultlocale()[0] or "en_US")
+                langs = [sys_lang]
+            self._profile.setSpellCheckLanguages(langs)
+
         self._apply_profile_settings()
 
         # shroud:// scheme handler
@@ -324,7 +335,22 @@ class MainWindow(
             w = int(ws.get("width", 1280))
             h = int(ws.get("height", 900))
             if "x" in ws and "y" in ws:
-                self.setGeometry(int(ws["x"]), int(ws["y"]), w, h)
+                x, y = int(ws["x"]), int(ws["y"])
+                # Multi-monitor safety: if the saved position is on a screen
+                # that no longer exists (laptop undocked, external unplugged),
+                # the window would land off-screen and be unreachable. Verify
+                # the geometry overlaps at least one current screen.
+                from PyQt6.QtWidgets import QApplication
+                from PyQt6.QtCore import QRect
+                target = QRect(x, y, w, h)
+                visible = any(
+                    s.availableGeometry().intersects(target)
+                    for s in QApplication.screens()
+                )
+                if visible:
+                    self.setGeometry(x, y, w, h)
+                else:
+                    self.resize(w, h)
             else:
                 self.resize(w, h)
             mode = ws.get("state", "normal")
