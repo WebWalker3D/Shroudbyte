@@ -49,6 +49,16 @@ A privacy-focused web browser built with PyQt6 and Chromium (QtWebEngine) for Li
 - **Permission Ledger** (`shroud://permissions`) -- Audit log of site permission usage with anomaly detection and auto-expire TTL.
 - **Download Verification** -- Verify download integrity via SHA-256/512 and MD5 hash checking.
 - **Encrypted Export/Import** -- Export and import browser state as password-protected encrypted archives.
+- **Address Autofill** (`shroud://addresses`) -- Saved address profiles (Home, Work, etc.) for autofilling any form whose inputs declare standard HTML `autocomplete="..."` attributes (name, street-address, postal-code, email, tel, etc.). Encrypted with the password-vault key when the vault is unlocked. `Ctrl+Shift+A` opens the chooser.
+- **Tab Hibernation** -- Optional automatic discard of inactive tab content to bound memory use. Hibernated tabs become lightweight placeholders that reload when clicked. Configurable per-minute idle threshold; off by default.
+- **Bookmark Bar** -- Optional always-on toolbar of top bookmarks. Toggle with `Ctrl+Alt+B` or under Bookmarks > Toggle Bookmarks Bar.
+- **Dockable DevTools** -- DevTools open in a right-side dock instead of a separate tab; movable, floatable, and toggles closed when re-invoked.
+- **High-Contrast Theme** -- WCAG-leaning palette (pure black/white with saturated yellow focus colors) alongside Dark and Light.
+- **Crash Log Viewer** (`shroud://crashes`) -- Read past crashes inline as collapsible per-crash blocks; the crash dialog itself offers explicit Copy-to-clipboard and Open-log-folder actions (Shroudbyte never uploads).
+- **Crash Recovery Prompt** -- On detecting an ungraceful shutdown, the next launch offers Restore tabs / Start fresh / View log instead of silently re-loading whatever caused the crash.
+- **Drag-and-Drop URLs** -- Drag a link from another app onto the tab bar to open it as a new tab.
+- **Window State Memory** -- Window size, maximized, and fullscreen state are restored across launches, with a multi-monitor sanity check that prevents windows from landing on a disconnected display.
+- **Opt-in Update Check** -- Once-per-day GitHub Releases query when explicitly enabled in settings. Off by default; banner appears on `shroud://about` when a newer version is available.
 
 ### Privacy & Security
 - **Ad & Tracker Blocker** -- 111+ hardcoded blocked domains plus downloadable filter lists (EasyList, EasyPrivacy, Fanboy's Annoyance, Peter Lowe's, URLhaus). Per-page request tracking with per-site allow/block exceptions.
@@ -95,6 +105,8 @@ A privacy-focused web browser built with PyQt6 and Chromium (QtWebEngine) for Li
 | `shroud://extensions` | Content script extensions manager |
 | `shroud://profiles` | Browser profiles/containers |
 | `shroud://sessions` | Named session management |
+| `shroud://addresses` | Saved address profiles for form autofill |
+| `shroud://crashes` | Local crash log viewer (no upload) |
 
 All internal pages share a consistent sidebar with cross-page navigation.
 
@@ -170,9 +182,11 @@ Tests are isolated via a fixture that redirects all storage I/O to a temporary d
 | Bookmark Page | Ctrl+D |
 | Save Page Offline | Ctrl+Shift+D |
 | All Bookmarks | Ctrl+Shift+B |
+| Toggle Bookmarks Bar | Ctrl+Alt+B |
 | Downloads | Ctrl+J |
 | Password Manager | Ctrl+Shift+M |
 | Auto-fill Password | Ctrl+Shift+L |
+| Fill Address | Ctrl+Shift+A |
 | Print | Ctrl+P |
 | Save as PDF | Ctrl+Shift+S |
 | Screenshot | Ctrl+Shift+E |
@@ -192,7 +206,9 @@ All browser data is stored in `~/.shroudbyte/` (override with `SHROUDBYTE_DATA_D
 ├── bookmarks.json
 ├── settings.json
 ├── session.json
+├── window_state.json         # Last window geometry + maximized/fullscreen
 ├── passwords.enc
+├── addresses.dat             # Encrypted when vault is unlocked; plain JSON otherwise
 ├── blocked_hosts.txt
 ├── filter_settings.json
 ├── site_exceptions.json
@@ -200,6 +216,9 @@ All browser data is stored in `~/.shroudbyte/` (override with `SHROUDBYTE_DATA_D
 ├── saved_pages.json
 ├── cookie_whitelist.json
 ├── permissions.json
+├── update_check.json         # Cached opt-in update query result
+├── crash.log                 # Local crash log (never uploaded)
+├── .running                  # Marker for detecting unclean shutdowns
 ├── filters/
 │   ├── easylist.txt
 │   ├── easyprivacy.txt
@@ -228,7 +247,11 @@ browser/
 │   ├── browser_actions.py   # History, downloads, printing, PDF, screenshots
 │   ├── data_management.py   # Filter lists, cookies, permissions, bookmarks I/O, PiP
 │   └── session.py       # Session save/restore and autosave
-├── scheme.py            # shroud:// URL scheme handler (17 internal pages)
+├── scheme.py            # shroud:// URL scheme handler (19 internal pages)
+├── addresses.py         # Saved address profiles for form autofill
+├── updater.py           # Opt-in GitHub release update check
+├── i18n.py              # gettext scaffolding for translations
+├── webview_ipc.py       # Dispatch table for injected-JS console messages
 ├── adblock.py           # Network request interceptor, per-page tracking, site exceptions
 ├── adblock_engine.py    # Enhanced ABP-style filter engine with scriptlet support
 ├── filterlists.py       # Filter list download, parsing, cosmetic CSS generation
@@ -259,27 +282,58 @@ browser/
 ├── background_activity.py # Service worker and push subscription tracking
 ├── newtab.py            # New tab page with search and quick links
 ├── reader.py            # Reader mode content extraction
-├── style.py             # Dark theme colors and stylesheets
+├── style.py             # Dark / Light / High-contrast theme palettes
 ├── dns_proxy.py         # Local SOCKS5 proxy for Shroud DNS
 ├── dns_auth.py          # HMAC-authenticated DNS query client
 ├── keyring_backend.py   # OS keyring abstraction for secret storage
 └── crashhandler.py      # Global crash handler with logging
 
-tests/
-├── conftest.py          # Shared fixtures (tmp data dir isolation)
+tests/                   # 436 tests covering ~80% of modules
+├── conftest.py          # Shared fixtures (tmp data dir isolation, DB reset)
 ├── test_adblock.py
+├── test_adblock_engine.py
+├── test_addresses.py
+├── test_annoyance_shield.py
+├── test_background_activity.py
 ├── test_clipboard.py
+├── test_crashhandler.py
 ├── test_crypto.py
 ├── test_db.py
+├── test_dns_auth.py
+├── test_dns_proxy.py
+├── test_download_verify.py
 ├── test_export.py
+├── test_extensions.py
 ├── test_filterlists.py
+├── test_fingerprint.py
+├── test_i18n.py
+├── test_keyring_backend.py
 ├── test_link_intel.py
+├── test_newtab.py
 ├── test_pagewatcher.py
 ├── test_passwords.py
+├── test_permission_ledger.py
+├── test_profiles.py
 ├── test_pwa.py
+├── test_reader.py
+├── test_scheme_pages.py        # smoke-renders every shroud:// page
 ├── test_screentime.py
-└── test_storage.py
+├── test_session_manager.py
+├── test_site_settings.py
+├── test_storage.py
+├── test_style.py
+├── test_tab_hibernation.py
+├── test_updater.py
+├── test_warc_capture.py
+└── test_webview_ipc.py
 
 scripts/
-└── build-appimage.sh    # AppImage build script
+├── build-appimage.sh    # AppImage build script (downloads appimagetool)
+└── extract-i18n.sh      # xgettext wrapper for translators
 ```
+
+## Continuous integration
+
+`.github/workflows/tests.yml` runs the test suite on every push and pull
+request against Python 3.11 and 3.12, with Qt in `offscreen` mode so
+WebEngine doesn't need a display server.
