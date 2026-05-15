@@ -55,10 +55,17 @@ def _write_crash_log(report: str):
 
 
 def _show_crash_dialog(report: str):
-    """Show a Qt dialog with the crash details (best-effort)."""
+    """Show a Qt dialog with the crash details (best-effort).
+
+    Gives the user explicit, opt-in actions:
+      * Copy the report to the clipboard (so they can paste it into an
+        issue tracker themselves — Shroudbyte never uploads on its own)
+      * Open the crash log directory
+    """
     try:
-        from PyQt6.QtWidgets import QApplication, QMessageBox, QTextEdit
-        from PyQt6.QtCore import Qt
+        from PyQt6.QtWidgets import QApplication, QMessageBox
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
 
         # If there's no QApplication yet, we can't show a dialog.
         app = QApplication.instance()
@@ -69,14 +76,33 @@ def _show_crash_dialog(report: str):
         box.setWindowTitle("Shroudbyte — Crash Report")
         box.setIcon(QMessageBox.Icon.Critical)
         box.setText("Shroudbyte encountered an unexpected error and needs to close.")
-        box.setInformativeText(f"Details have been saved to:\n{CRASH_LOG}")
+        box.setInformativeText(
+            f"Details have been saved to:\n{CRASH_LOG}\n\n"
+            "Shroudbyte never uploads crash data. If you'd like to share "
+            "this report, use 'Copy to clipboard' and paste it into a "
+            "GitHub issue yourself."
+        )
         box.setDetailedText(report)
-        box.setStandardButtons(QMessageBox.StandardButton.Close)
+        close_btn = box.addButton(QMessageBox.StandardButton.Close)
+        copy_btn = box.addButton(
+            "Copy to clipboard", QMessageBox.ButtonRole.ActionRole
+        )
+        open_btn = box.addButton(
+            "Open log folder", QMessageBox.ButtonRole.ActionRole
+        )
+        box.setDefaultButton(close_btn)
 
         # Widen the details area so tracebacks are readable.
         box.setStyleSheet("QTextEdit { min-width: 600px; min-height: 300px; }")
 
         box.exec()
+        clicked = box.clickedButton()
+        if clicked is copy_btn:
+            cb = QApplication.clipboard()
+            if cb is not None:
+                cb.setText(report)
+        elif clicked is open_btn:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(CRASH_LOG.parent)))
     except Exception:
         # If the dialog itself fails, just print to stderr as a fallback.
         pass
