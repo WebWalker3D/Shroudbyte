@@ -462,8 +462,15 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
     .bm-list {{ padding: 4px 0; }}
     .bm-entry {{
       display: flex; align-items: center; padding: 10px 18px; gap: 12px;
+      transition: background 0.1s;
     }}
     .bm-entry + .bm-entry {{ border-top: 1px solid {BORDER}; }}
+    .bm-entry.dragging {{ opacity: 0.4; background: {BG_HOVER}; }}
+    .drag-handle {{
+      cursor: grab; color: {TEXT_FAINT}; font-size: 14px;
+      user-select: none; padding: 2px 4px;
+    }}
+    .drag-handle:active {{ cursor: grabbing; }}
     .bm-meta {{ display: flex; gap: 6px; align-items: center; margin-top: 3px; flex-wrap: wrap; }}
     .bm-meta-folder {{
       font-size: 10px; color: {TEXT_FAINT};
@@ -610,7 +617,8 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
         }}
         var metaHtml = meta ? '<div class="bm-meta">' + meta + '</div>' : '';
 
-        h += '<div class="bm-entry">' +
+        h += '<div class="bm-entry" draggable="true" data-url="' + u + '">' +
+          '<span class="drag-handle" title="Drag to reorder">☰</span>' +
           '<a href="' + u + '" class="entry-link" style="flex:1;min-width:0;text-decoration:none;">' +
           '<div class="entry-title">' + t + '</div>' +
           '<div class="entry-url">' + u + '</div>' +
@@ -622,11 +630,46 @@ class ShroudSchemeHandler(QWebEngineUrlSchemeHandler):
           '</div>';
       }}
       el.innerHTML = h;
+      attachDragHandlers();
     }}
 
-    function pageAct(action, arg) {{
-      console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify({{action:action,arg:arg}}));
-      setTimeout(function(){{ location.reload(); }}, 200);
+    function attachDragHandlers() {{
+      var listEl = document.getElementById('bmList');
+      var dragged = null;
+      listEl.querySelectorAll('.bm-entry').forEach(function(row) {{
+        row.addEventListener('dragstart', function(e) {{
+          dragged = row;
+          row.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+          // Firefox needs some data set to start the drag.
+          e.dataTransfer.setData('text/plain', row.dataset.url || '');
+        }});
+        row.addEventListener('dragend', function() {{
+          if (dragged) dragged.classList.remove('dragging');
+          dragged = null;
+          // Persist the new order on drop completion.
+          var urls = Array.prototype.map.call(
+            listEl.querySelectorAll('.bm-entry'),
+            function(e) {{ return e.dataset.url; }}
+          );
+          pageAct('reorder_bookmarks', '', {{urls: urls}});
+        }});
+        row.addEventListener('dragover', function(e) {{
+          if (!dragged || dragged === row) return;
+          e.preventDefault();
+          var rect = row.getBoundingClientRect();
+          var insertBefore = (e.clientY - rect.top) < rect.height / 2;
+          listEl.insertBefore(dragged, insertBefore ? row : row.nextSibling);
+        }});
+      }});
+    }}
+
+    function pageAct(action, arg, extras) {{
+      var payload = Object.assign({{action:action,arg:arg}}, extras || {{}});
+      console.log('__SHROUD_PAGE_ACT__:' + JSON.stringify(payload));
+      if (action !== 'reorder_bookmarks') {{
+        setTimeout(function(){{ location.reload(); }}, 200);
+      }}
     }}
 
     function openEdit(url) {{

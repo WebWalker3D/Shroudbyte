@@ -151,6 +151,26 @@ def render_netscape_bookmarks(bookmarks: list[dict]) -> str:
     return "\n".join(out)
 
 
+def reorder_bookmarks(url_order: list[str]):
+    """Sort the bookmarks file to match the URL order given.
+
+    URLs not present in ``url_order`` keep their existing relative
+    position at the end. Unknown URLs in ``url_order`` are ignored.
+    """
+    current = load_bookmarks()
+    by_url = {bm.get("url"): bm for bm in current if bm.get("url")}
+    reordered: list[dict] = []
+    seen: set[str] = set()
+    for url in url_order:
+        if url in by_url and url not in seen:
+            reordered.append(by_url[url])
+            seen.add(url)
+    for bm in current:
+        if bm.get("url") not in seen:
+            reordered.append(bm)
+    save_bookmarks(reordered)
+
+
 def parse_netscape_bookmarks(content: str) -> list[dict]:
     """Parse Netscape bookmark HTML, preserving folder nesting.
 

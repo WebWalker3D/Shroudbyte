@@ -137,6 +137,36 @@ class TestPermissions:
         assert storage.get_permission("example.com", "mic") is None
 
 
+class TestReorderBookmarks:
+    def _bms(self, *urls):
+        for u in urls:
+            storage.add_bookmark(u.replace("https://", "").rstrip("/"), u)
+
+    def test_reorders_to_match(self, tmp_data_dir):
+        self._bms("https://a.com", "https://b.com", "https://c.com")
+        storage.reorder_bookmarks([
+            "https://c.com", "https://a.com", "https://b.com",
+        ])
+        order = [bm["url"] for bm in storage.load_bookmarks()]
+        assert order == ["https://c.com", "https://a.com", "https://b.com"]
+
+    def test_unknown_urls_ignored(self, tmp_data_dir):
+        self._bms("https://a.com", "https://b.com")
+        storage.reorder_bookmarks([
+            "https://ghost", "https://b.com", "https://a.com",
+        ])
+        order = [bm["url"] for bm in storage.load_bookmarks()]
+        assert order == ["https://b.com", "https://a.com"]
+
+    def test_omitted_urls_keep_position_at_end(self, tmp_data_dir):
+        # Partial reorder — c isn't in the list, should stay at the end.
+        self._bms("https://a.com", "https://b.com", "https://c.com")
+        storage.reorder_bookmarks(["https://b.com"])
+        order = [bm["url"] for bm in storage.load_bookmarks()]
+        assert order[0] == "https://b.com"
+        assert set(order[1:]) == {"https://a.com", "https://c.com"}
+
+
 class TestPermissionExpiry:
     """The permission_ttl_days setting drives an expires_at field that
     get_permission must honor — expired entries should return None and

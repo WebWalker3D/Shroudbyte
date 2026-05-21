@@ -535,6 +535,11 @@ class PageFeaturesMixin:
             view = self._current_view()
             if view:
                 self._update_bookmark_btn(view.url())
+        elif action == "reorder_bookmarks":
+            urls = data.get("urls", [])
+            if isinstance(urls, list):
+                storage.reorder_bookmarks(urls)
+                self._populate_bookmarks_menu()
         elif action == "edit_bookmark" and arg:
             title = data.get("title")
             folder = data.get("folder")
