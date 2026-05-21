@@ -113,6 +113,13 @@ fun BrowserScreen(app: ShroudApplication, theme: ShroudTheme = ShroudTheme.Dark)
                     }
                     scope.launch { drawerState.close() }
                 }
+                DrawerItem("Add to home screen") {
+                    val tab = vm.currentTab
+                    if (tab != null && tab.url.isNotBlank() && tab.url != "about:blank") {
+                        AddToHomescreen.pin(app, tab.url, tab.title)
+                    }
+                    scope.launch { drawerState.close() }
+                }
             }
         },
     ) {
