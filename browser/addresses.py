@@ -71,9 +71,38 @@ def set_encryption_key(key: bytes | None):
     Passing ``None`` reverts to plain JSON. Passing a 32-byte AES-256 key
     causes the next :func:`_save_all` to produce an encrypted file, and
     subsequent reads to require the same key.
+
+    When a key is being set for the first time *while* an unencrypted
+    file already exists on disk, the file is re-encrypted immediately
+    so a later vault lock can't leave plaintext PII sitting around.
     """
     global _active_key
+    previous = _active_key
     _active_key = key
+    if key is not None and previous is None:
+        _migrate_plaintext_to_encrypted()
+
+
+def _migrate_plaintext_to_encrypted():
+    """If a plaintext addresses.dat exists, re-write it encrypted.
+
+    Called from :func:`set_encryption_key` on the no-key → key
+    transition (i.e. the user just set up the password vault).
+    Safe to call when no file exists.
+    """
+    path = _data_path()
+    if not path.exists():
+        return
+    blob = path.read_bytes()
+    if not blob or blob[0] == crypto.VAULT_VERSION:
+        return  # Empty or already encrypted.
+    try:
+        entries = json.loads(blob.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        # Don't try to migrate a malformed file — _load_all will report it.
+        return
+    _save_all(entries)
+    logger.info("Re-encrypted %d address entries after vault unlock", len(entries))
 
 
 @dataclass

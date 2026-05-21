@@ -190,3 +190,17 @@ class TestEncryption:
         assert blob[0] == crypto.VAULT_VERSION
         ids = {x.id for x in addresses.list_addresses()}
         assert {a.id, b.id} == ids
+
+    def test_setting_key_for_first_time_re_encrypts_existing(self, tmp_data_dir):
+        # No key yet — plain JSON.
+        a = addresses.add_address("Home", VALID_FIELDS)
+        path = tmp_data_dir / "addresses.dat"
+        assert path.read_bytes()[:1] == b"["
+
+        # First time a key is set: existing plaintext must be re-written
+        # encrypted, without waiting for the next add/edit.
+        key = os.urandom(32)
+        addresses.set_encryption_key(key)
+        assert path.read_bytes()[0] == crypto.VAULT_VERSION
+        # Round-trip still works.
+        assert addresses.get_address(a.id).label == "Home"
