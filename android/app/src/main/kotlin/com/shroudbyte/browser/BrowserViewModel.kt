@@ -28,32 +28,42 @@ class BrowserViewModel(private val app: ShroudApplication) : AndroidViewModel(ap
         get() = tabs.getOrNull(currentIndex)
 
     init {
-        if (tabs.isEmpty()) {
-            tabs += TabState(app.settings.load().searchEngine
-                .substringBefore("/?")
-                .ifBlank { "about:blank" })
+        // Restore the previous session if it produced any tabs.
+        if (app.settings.load().restoreSession) {
+            for (saved in app.session.load()) {
+                tabs += TabState(saved.url).also { it.title = saved.title }
+            }
         }
+        if (tabs.isEmpty()) tabs += TabState()
     }
 
     fun newTab(url: String = "about:blank") {
         tabs += TabState(url)
         currentIndex = tabs.lastIndex
+        persist()
     }
 
     fun closeTab(index: Int) {
+        tabs.getOrNull(index)?.webView = null
         if (tabs.size <= 1) {
-            // Keep at least one tab open; replace its content instead.
             tabs[0] = TabState()
             currentIndex = 0
+            persist()
             return
         }
         val wasCurrent = index == currentIndex
         tabs.removeAt(index)
         if (wasCurrent) {
-            currentIndex = (index).coerceAtMost(tabs.lastIndex)
+            currentIndex = index.coerceAtMost(tabs.lastIndex)
         } else if (index < currentIndex) {
             _currentIndex.value = currentIndex - 1
         }
+        persist()
+    }
+
+    /** Save the open tabs to disk. Cheap; called after every nav and close. */
+    fun persist() {
+        app.session.save(tabs.toList())
     }
 
     /** Resolve a URL-bar entry to a navigable URL, falling back to a search. */
@@ -78,6 +88,43 @@ class BrowserViewModel(private val app: ShroudApplication) : AndroidViewModel(ap
         tab.lastActive = System.currentTimeMillis()
         // History is recorded on page-load callback, not here, so we
         // capture the post-redirect URL.
+        persist()
+    }
+
+    // ------------------------------------------------------------------
+    // Tab actions driven by the toolbar (back / forward / reload / bookmark)
+    // ------------------------------------------------------------------
+
+    fun back() {
+        val tab = currentTab ?: return
+        if (tab.canGoBack) tab.webView?.goBack()
+    }
+
+    fun forward() {
+        val tab = currentTab ?: return
+        if (tab.canGoForward) tab.webView?.goForward()
+    }
+
+    fun reload() {
+        currentTab?.webView?.reload()
+    }
+
+    fun toggleBookmark(): Boolean {
+        val tab = currentTab ?: return false
+        val url = tab.url
+        if (url.isBlank() || url == "about:blank") return false
+        return if (app.bookmarks.isBookmarked(url)) {
+            app.bookmarks.remove(url)
+            false
+        } else {
+            app.bookmarks.add(tab.title.ifBlank { url }, url)
+            true
+        }
+    }
+
+    fun isCurrentBookmarked(): Boolean {
+        val url = currentTab?.url ?: return false
+        return app.bookmarks.isBookmarked(url)
     }
 
     companion object {

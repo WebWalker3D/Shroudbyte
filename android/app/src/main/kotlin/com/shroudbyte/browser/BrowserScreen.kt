@@ -11,9 +11,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,23 +28,113 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shroudbyte.ShroudApplication
+import com.shroudbyte.ui.screens.AddressesScreen
+import com.shroudbyte.ui.screens.BookmarksScreen
+import com.shroudbyte.ui.screens.HistoryScreen
+import com.shroudbyte.ui.screens.SettingsScreen
+import kotlinx.coroutines.launch
 
+/**
+ * Screen the navigation drawer can route to. The browser itself is the
+ * default; the others are full-screen takeovers that snap back via the
+ * top-left arrow.
+ */
+enum class Route { Browser, Bookmarks, History, Settings, Addresses }
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BrowserScreen(app: ShroudApplication) {
     val vm: BrowserViewModel = viewModel(factory = BrowserViewModel.Factory)
-    var urlBarText by remember(vm.currentTab?.id) {
+    var route by remember { mutableStateOf(Route.Browser) }
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet {
+                Spacer(Modifier.height(16.dp))
+                DrawerItem("Bookmarks") {
+                    route = Route.Bookmarks
+                    scope.launch { drawerState.close() }
+                }
+                DrawerItem("History") {
+                    route = Route.History
+                    scope.launch { drawerState.close() }
+                }
+                DrawerItem("Addresses") {
+                    route = Route.Addresses
+                    scope.launch { drawerState.close() }
+                }
+                DrawerItem("Settings") {
+                    route = Route.Settings
+                    scope.launch { drawerState.close() }
+                }
+            }
+        },
+    ) {
+        when (route) {
+            Route.Browser -> BrowserContent(
+                app = app,
+                vm = vm,
+                onOpenDrawer = { scope.launch { drawerState.open() } },
+            )
+            Route.Bookmarks -> BookmarksScreen(
+                app = app,
+                onBack = { route = Route.Browser },
+                onOpen = { url ->
+                    vm.navigate(url)
+                    route = Route.Browser
+                },
+            )
+            Route.History -> HistoryScreen(
+                app = app,
+                onBack = { route = Route.Browser },
+                onOpen = { url ->
+                    vm.navigate(url)
+                    route = Route.Browser
+                },
+            )
+            Route.Addresses -> AddressesScreen(
+                app = app,
+                onBack = { route = Route.Browser },
+                onFill = { addressId ->
+                    val tab = vm.currentTab ?: return@AddressesScreen
+                    val wv = tab.webView ?: return@AddressesScreen
+                    app.addresses.get(addressId)?.let { addr ->
+                        com.shroudbyte.addresses.AddressFill.fillInto(wv, addr)
+                    }
+                    route = Route.Browser
+                },
+            )
+            Route.Settings -> SettingsScreen(
+                app = app,
+                onBack = { route = Route.Browser },
+            )
+        }
+    }
+}
+
+@Composable
+private fun BrowserContent(
+    app: ShroudApplication,
+    vm: BrowserViewModel,
+    onOpenDrawer: () -> Unit,
+) {
+    var urlBarText by remember(vm.currentTab?.id, vm.currentTab?.url) {
         mutableStateOf(vm.currentTab?.url.orEmpty())
     }
-
     Scaffold(
         topBar = {
             BrowserTopBar(
+                vm = vm,
                 urlBarText = urlBarText,
                 onUrlBarTextChange = { urlBarText = it },
                 onGo = {
                     vm.navigate(urlBarText)
                     urlBarText = vm.currentTab?.url.orEmpty()
                 },
+                onOpenDrawer = onOpenDrawer,
             )
         },
         bottomBar = {
@@ -67,7 +162,6 @@ fun BrowserScreen(app: ShroudApplication) {
                                 settings.javaScriptEnabled = app.settings.load().enableJavascript
                                 settings.domStorageEnabled = true
                                 settings.databaseEnabled = true
-                                settings.userAgentString = settings.userAgentString
                                 webViewClient = ShroudWebViewClient(
                                     tab, app.settings, app.history, app.hostBlocker,
                                 )
@@ -79,10 +173,13 @@ fun BrowserScreen(app: ShroudApplication) {
                                         if (!title.isNullOrBlank()) tab.title = title
                                     }
                                 }
+                                tab.webView = this
                                 if (tab.url != "about:blank") loadUrl(tab.url)
                             }
                         },
                         update = { wv ->
+                            tab.canGoBack = wv.canGoBack()
+                            tab.canGoForward = wv.canGoForward()
                             if (wv.url != tab.url && tab.url != "about:blank") {
                                 wv.loadUrl(tab.url)
                             }
@@ -103,31 +200,62 @@ fun BrowserScreen(app: ShroudApplication) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BrowserTopBar(
+    vm: BrowserViewModel,
     urlBarText: String,
     onUrlBarTextChange: (String) -> Unit,
     onGo: () -> Unit,
+    onOpenDrawer: () -> Unit,
 ) {
+    val tab = vm.currentTab
     Surface(tonalElevation = 2.dp) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OutlinedTextField(
-                value = urlBarText,
-                onValueChange = onUrlBarTextChange,
+        Column {
+            Row(
                 modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 48.dp),
-                singleLine = true,
-                shape = RoundedCornerShape(24.dp),
-                placeholder = { Text("Search or enter URL") },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                keyboardActions = KeyboardActions(onGo = { onGo() }),
-            )
-            IconButton(onClick = onGo) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Go")
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onOpenDrawer) {
+                    Icon(Icons.Default.Menu, contentDescription = "Menu")
+                }
+                IconButton(onClick = { vm.back() }, enabled = tab?.canGoBack == true) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Back")
+                }
+                IconButton(onClick = { vm.forward() }, enabled = tab?.canGoForward == true) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Forward")
+                }
+                IconButton(onClick = { vm.reload() }) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Reload")
+                }
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = urlBarText,
+                    onValueChange = onUrlBarTextChange,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp),
+                    singleLine = true,
+                    shape = RoundedCornerShape(24.dp),
+                    placeholder = { Text("Search or enter URL") },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                    keyboardActions = KeyboardActions(onGo = { onGo() }),
+                )
+                IconButton(onClick = { vm.toggleBookmark() }) {
+                    val starred = vm.isCurrentBookmarked()
+                    Icon(
+                        imageVector = if (starred)
+                            Icons.Filled.Star
+                        else
+                            Icons.Outlined.Star,
+                        contentDescription = if (starred) "Remove bookmark" else "Bookmark",
+                    )
+                }
             }
         }
     }
@@ -196,3 +324,12 @@ private fun TabStrip(
     }
 }
 
+@Composable
+private fun DrawerItem(label: String, onClick: () -> Unit) {
+    NavigationDrawerItem(
+        label = { Text(label) },
+        selected = false,
+        onClick = onClick,
+        modifier = Modifier.padding(horizontal = 12.dp),
+    )
+}
