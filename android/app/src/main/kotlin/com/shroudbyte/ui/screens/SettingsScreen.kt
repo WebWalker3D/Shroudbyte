@@ -3,6 +3,11 @@ package com.shroudbyte.ui.screens
 import android.webkit.CookieManager
 import android.webkit.WebStorage
 import android.webkit.WebView
+import com.shroudbyte.adblock.FilterLists
+import com.shroudbyte.adblock.HostBlocker
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -86,6 +91,11 @@ fun SettingsScreen(app: ShroudApplication, onBack: () -> Unit) {
 
             HorizontalDivider()
 
+            Text("Filter lists", style = MaterialTheme.typography.titleMedium)
+            FilterListSection(app = app)
+
+            HorizontalDivider()
+
             Text("Clear data", style = MaterialTheme.typography.titleMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { clearConfirm = "history" }) {
@@ -157,6 +167,75 @@ private fun ThemePicker(selected: String, onSelect: (String) -> Unit) {
                     onClick = { onSelect(value) },
                 )
                 Text(label)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FilterListSection(app: com.shroudbyte.ShroudApplication) {
+    val scope = rememberCoroutineScope()
+    var prefsTick by remember { mutableIntStateOf(0) }
+    var refreshing by remember { mutableStateOf(false) }
+    var lastResult by remember { mutableStateOf<String?>(null) }
+
+    val lastFetched = remember(prefsTick, lastResult) { app.filterListDownloader.lastFetched() }
+    val cachedCount = remember(prefsTick, lastResult) { app.filterListDownloader.loadCached().size }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            "Cached hosts: $cachedCount",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.outline,
+        )
+        for (source in FilterLists.SOURCES) {
+            // remember(prefsTick) so toggling persists immediately in the UI.
+            val enabled = remember(source.id, prefsTick) {
+                app.filterListPrefs.isEnabled(source)
+            }
+            val meta = lastFetched.firstOrNull { it.sourceId == source.id }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(source.name)
+                    val sub = when {
+                        meta != null -> "${meta.hostCount} hosts · ${source.format.name.lowercase()}"
+                        else -> source.format.name.lowercase()
+                    }
+                    Text(
+                        sub,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+                Switch(checked = enabled, onCheckedChange = {
+                    app.filterListPrefs.setEnabled(source, it)
+                    prefsTick++
+                })
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = {
+                    if (refreshing) return@OutlinedButton
+                    refreshing = true
+                    scope.launch {
+                        val hosts = withContext(Dispatchers.IO) {
+                            app.filterListDownloader.refresh()
+                        }
+                        app.hostBlocker.setHosts(HostBlocker.DEFAULT_HOSTS + hosts)
+                        lastResult = "Refreshed: ${hosts.size} hosts"
+                        prefsTick++
+                        refreshing = false
+                    }
+                },
+                enabled = !refreshing,
+            ) {
+                Text(if (refreshing) "Refreshing…" else "Refresh now")
+            }
+            lastResult?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall,
+                     color = MaterialTheme.colorScheme.outline,
+                     modifier = Modifier.align(Alignment.CenterVertically))
             }
         }
     }

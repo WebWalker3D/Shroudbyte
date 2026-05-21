@@ -2,6 +2,9 @@ package com.shroudbyte
 
 import android.app.Application
 import com.shroudbyte.addresses.AddressBook
+import com.shroudbyte.adblock.FilterListDownloader
+import com.shroudbyte.adblock.FilterListPreferences
+import com.shroudbyte.adblock.FilterListWorker
 import com.shroudbyte.adblock.HostBlocker
 import com.shroudbyte.browser.SessionRepository
 import com.shroudbyte.passwords.PasswordVault
@@ -36,6 +39,10 @@ class ShroudApplication : Application() {
         private set
     lateinit var watches: PageWatchesRepository
         private set
+    lateinit var filterListPrefs: FilterListPreferences
+        private set
+    lateinit var filterListDownloader: FilterListDownloader
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -51,7 +58,16 @@ class ShroudApplication : Application() {
         session = SessionRepository(storage)
         vault = PasswordVault(storage)
         watches = PageWatchesRepository(storage)
-        // Keep the background page-change worker scheduled.
+        filterListPrefs = FilterListPreferences(storage)
+        filterListDownloader = FilterListDownloader(storage, filterListPrefs)
+        // Seed HostBlocker with whatever filter lists are already cached
+        // on disk; the worker will refresh in the background.
+        val cached = filterListDownloader.loadCached()
+        if (cached.isNotEmpty()) {
+            hostBlocker.setHosts(HostBlocker.DEFAULT_HOSTS + cached)
+        }
+        // Schedule both periodic workers.
         PageWatchScheduler.ensureScheduled(this)
+        FilterListWorker.ensureScheduled(this)
     }
 }
