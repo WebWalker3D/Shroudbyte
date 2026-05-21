@@ -9,6 +9,8 @@ import com.shroudbyte.storage.BookmarksRepository
 import com.shroudbyte.storage.HistoryRepository
 import com.shroudbyte.storage.SettingsRepository
 import com.shroudbyte.storage.Storage
+import com.shroudbyte.watches.PageWatchScheduler
+import com.shroudbyte.watches.PageWatchesRepository
 
 /**
  * Process-lifetime singletons. A real app would wire these through
@@ -32,6 +34,8 @@ class ShroudApplication : Application() {
         private set
     lateinit var vault: PasswordVault
         private set
+    lateinit var watches: PageWatchesRepository
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -46,5 +50,8 @@ class ShroudApplication : Application() {
         hostBlocker = HostBlocker()
         session = SessionRepository(storage)
         vault = PasswordVault(storage)
+        watches = PageWatchesRepository(storage)
+        // Keep the background page-change worker scheduled.
+        PageWatchScheduler.ensureScheduled(this)
     }
 }

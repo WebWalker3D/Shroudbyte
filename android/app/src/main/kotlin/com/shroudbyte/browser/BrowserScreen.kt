@@ -38,6 +38,7 @@ import com.shroudbyte.ui.screens.NewTabPanel
 import com.shroudbyte.ui.screens.PasswordsScreen
 import com.shroudbyte.ui.screens.ReaderScreen
 import com.shroudbyte.ui.screens.SettingsScreen
+import com.shroudbyte.ui.screens.WatchesScreen
 import com.shroudbyte.ui.theme.ShroudTheme
 import kotlinx.coroutines.launch
 
@@ -46,7 +47,7 @@ import kotlinx.coroutines.launch
  * default; the others are full-screen takeovers that snap back via the
  * top-left arrow.
  */
-enum class Route { Browser, Bookmarks, History, Settings, Addresses, Passwords, About, Reader }
+enum class Route { Browser, Bookmarks, History, Settings, Addresses, Passwords, About, Reader, Watches }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -82,6 +83,10 @@ fun BrowserScreen(app: ShroudApplication, theme: ShroudTheme = ShroudTheme.Dark)
                     route = Route.Passwords
                     scope.launch { drawerState.close() }
                 }
+                DrawerItem("Page watches") {
+                    route = Route.Watches
+                    scope.launch { drawerState.close() }
+                }
                 DrawerItem("Settings") {
                     route = Route.Settings
                     scope.launch { drawerState.close() }
@@ -100,6 +105,13 @@ fun BrowserScreen(app: ShroudApplication, theme: ShroudTheme = ShroudTheme.Dark)
                     vm.openReader { ok ->
                         if (ok) route = Route.Reader
                     }
+                }
+                DrawerItem("Watch this page") {
+                    val tab = vm.currentTab
+                    if (tab != null && tab.url.isNotBlank() && tab.url != "about:blank") {
+                        app.watches.add(tab.url, tab.title)
+                    }
+                    scope.launch { drawerState.close() }
                 }
             }
         },
@@ -149,6 +161,14 @@ fun BrowserScreen(app: ShroudApplication, theme: ShroudTheme = ShroudTheme.Dark)
             Route.About -> AboutScreen(
                 app = app,
                 onBack = { route = Route.Browser },
+            )
+            Route.Watches -> WatchesScreen(
+                app = app,
+                onBack = { route = Route.Browser },
+                onOpen = { url ->
+                    vm.navigate(url)
+                    route = Route.Browser
+                },
             )
             Route.Reader -> {
                 val article = vm.readerArticle
