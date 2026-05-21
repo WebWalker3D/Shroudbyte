@@ -27,11 +27,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shroudbyte.ShroudApplication
 import com.shroudbyte.ui.screens.AddressesScreen
 import com.shroudbyte.ui.screens.BookmarksScreen
 import com.shroudbyte.ui.screens.HistoryScreen
+import com.shroudbyte.ui.screens.NewTabPanel
 import com.shroudbyte.ui.screens.SettingsScreen
 import kotlinx.coroutines.launch
 
@@ -137,6 +139,22 @@ private fun BrowserContent(
     BackHandler(enabled = vm.currentTab?.canGoBack == true) {
         vm.back()
     }
+
+    var contextHit by remember { mutableStateOf<LinkHit?>(null) }
+    val ctx = LocalContext.current
+
+    LinkContextMenu(
+        hit = contextHit,
+        onDismiss = { contextHit = null },
+        onOpenInNewTab = { url -> vm.newTab(url) },
+        onCopy = { url -> copyToClipboard(ctx, url) },
+        onShare = { url -> shareUrl(ctx, url) },
+        onDownloadImage = { url ->
+            Downloads.enqueue(ctx, url, vm.currentTab?.webView?.settings?.userAgentString,
+                              null, null)
+        },
+    )
+
     Scaffold(
         topBar = {
             BrowserTopBar(
@@ -163,47 +181,56 @@ private fun BrowserContent(
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
             val tab = vm.currentTab
             if (tab != null) {
-                key(tab.id) {
-                    AndroidView(
-                        modifier = Modifier.fillMaxSize(),
-                        factory = { ctx ->
-                            WebView(ctx).apply {
-                                layoutParams = ViewGroup.LayoutParams(
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                )
-                                settings.javaScriptEnabled = app.settings.load().enableJavascript
-                                settings.domStorageEnabled = true
-                                settings.databaseEnabled = true
-                                webViewClient = ShroudWebViewClient(
-                                    tab, app.settings, app.history, app.hostBlocker,
-                                )
-                                webChromeClient = object : WebChromeClient() {
-                                    override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                                        tab.progress = newProgress
+                if (tab.url.isBlank() || tab.url == "about:blank") {
+                    NewTabPanel(app = app, onOpen = { vm.navigate(it) })
+                } else {
+                    key(tab.id) {
+                        AndroidView(
+                            modifier = Modifier.fillMaxSize(),
+                            factory = { ctx ->
+                                WebView(ctx).apply {
+                                    layoutParams = ViewGroup.LayoutParams(
+                                        ViewGroup.LayoutParams.MATCH_PARENT,
+                                        ViewGroup.LayoutParams.MATCH_PARENT,
+                                    )
+                                    settings.javaScriptEnabled = app.settings.load().enableJavascript
+                                    settings.domStorageEnabled = true
+                                    settings.databaseEnabled = true
+                                    webViewClient = ShroudWebViewClient(
+                                        tab, app.settings, app.history, app.hostBlocker,
+                                    )
+                                    webChromeClient = ShroudWebChromeClient(ctx, tab)
+                                    setDownloadListener { url, userAgent, contentDisposition,
+                                                           mimeType, _ ->
+                                        Downloads.enqueue(ctx, url, userAgent,
+                                                          contentDisposition, mimeType)
                                     }
-                                    override fun onReceivedTitle(view: WebView?, title: String?) {
-                                        if (!title.isNullOrBlank()) tab.title = title
+                                    setOnLongClickListener {
+                                        val hit = (it as WebView).captureHit()
+                                        if (hit.isLink || hit.isImage) {
+                                            contextHit = hit
+                                            true
+                                        } else false
                                     }
+                                    tab.webView = this
+                                    loadUrl(tab.url)
                                 }
-                                tab.webView = this
-                                if (tab.url != "about:blank") loadUrl(tab.url)
-                            }
-                        },
-                        update = { wv ->
-                            tab.canGoBack = wv.canGoBack()
-                            tab.canGoForward = wv.canGoForward()
-                            if (wv.url != tab.url && tab.url != "about:blank") {
-                                wv.loadUrl(tab.url)
-                            }
-                        },
-                    )
-                }
-                if (tab.progress in 1..99) {
-                    LinearProgressIndicator(
-                        progress = { tab.progress / 100f },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                            },
+                            update = { wv ->
+                                tab.canGoBack = wv.canGoBack()
+                                tab.canGoForward = wv.canGoForward()
+                                if (wv.url != tab.url) {
+                                    wv.loadUrl(tab.url)
+                                }
+                            },
+                        )
+                    }
+                    if (tab.progress in 1..99) {
+                        LinearProgressIndicator(
+                            progress = { tab.progress / 100f },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 }
             }
         }
