@@ -480,10 +480,12 @@ private fun TabStrip(
     onNew: () -> Unit,
 ) {
     Surface(tonalElevation = 4.dp) {
+        // Fixed height (no IntrinsicSize.Min) — LazyRow is a
+        // SubcomposeLayout and doesn't support intrinsic measurement.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(IntrinsicSize.Min)
+                .height(44.dp)
                 .padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
