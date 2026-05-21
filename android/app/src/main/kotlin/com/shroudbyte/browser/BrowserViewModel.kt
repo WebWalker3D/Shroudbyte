@@ -7,6 +7,9 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.shroudbyte.ShroudApplication
+import com.shroudbyte.passwords.LoginFormDetector
+import com.shroudbyte.passwords.PasswordEntry
+import com.shroudbyte.passwords.PasswordFill
 
 /**
  * The top-level browser state — tabs, current tab index, address-bar
@@ -125,6 +128,76 @@ class BrowserViewModel(private val app: ShroudApplication) : AndroidViewModel(ap
     fun isCurrentBookmarked(): Boolean {
         val url = currentTab?.url ?: return false
         return app.bookmarks.isBookmarked(url)
+    }
+
+    // ------------------------------------------------------------------
+    // Reader mode
+    // ------------------------------------------------------------------
+
+    private val _readerArticle = mutableStateOf<ReaderArticle?>(null)
+    val readerArticle: ReaderArticle? get() = _readerArticle.value
+
+    fun openReader(onReady: (Boolean) -> Unit) {
+        val wv = currentTab?.webView
+        if (wv == null) {
+            onReady(false)
+            return
+        }
+        Reader.extract(wv) { article ->
+            _readerArticle.value = article
+            onReady(article != null)
+        }
+    }
+
+    fun closeReader() {
+        _readerArticle.value = null
+    }
+
+    // ------------------------------------------------------------------
+    // Autofill suggestion banner
+    //
+    // After a tab finishes loading we run a JS probe to decide whether
+    // a 'Fill credentials' banner should appear; the banner offers any
+    // vault entries that match the current host.
+    // ------------------------------------------------------------------
+
+    private val _autofillSuggestions = mutableStateOf<List<PasswordEntry>>(emptyList())
+    val autofillSuggestions: List<PasswordEntry> get() = _autofillSuggestions.value
+    private val _autofillBannerDismissed = mutableStateOf<String?>(null)
+    private val dismissedForTab: String? get() = _autofillBannerDismissed.value
+
+    fun maybeShowAutofill() {
+        val tab = currentTab ?: return
+        val wv = tab.webView ?: return
+        if (!app.vault.isUnlocked) {
+            _autofillSuggestions.value = emptyList()
+            return
+        }
+        val matches = app.vault.forUrl(tab.url)
+        if (matches.isEmpty()) {
+            _autofillSuggestions.value = emptyList()
+            return
+        }
+        if (_autofillBannerDismissed.value == tab.id + "@" + tab.url) {
+            // Already dismissed for this exact load; don't re-pester.
+            return
+        }
+        LoginFormDetector.probe(wv) { present ->
+            _autofillSuggestions.value = if (present) matches else emptyList()
+        }
+    }
+
+    fun applyAutofill(entry: PasswordEntry) {
+        val wv = currentTab?.webView ?: return
+        PasswordFill.fillInto(wv, entry)
+        app.vault.touch(entry.id)
+        _autofillSuggestions.value = emptyList()
+        currentTab?.let { _autofillBannerDismissed.value = it.id + "@" + it.url }
+    }
+
+    fun dismissAutofill() {
+        _autofillSuggestions.value = emptyList()
+        currentTab?.let { _autofillBannerDismissed.value = it.id + "@" + it.url }
     }
 
     // ------------------------------------------------------------------

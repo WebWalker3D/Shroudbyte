@@ -36,7 +36,9 @@ import com.shroudbyte.ui.screens.BookmarksScreen
 import com.shroudbyte.ui.screens.HistoryScreen
 import com.shroudbyte.ui.screens.NewTabPanel
 import com.shroudbyte.ui.screens.PasswordsScreen
+import com.shroudbyte.ui.screens.ReaderScreen
 import com.shroudbyte.ui.screens.SettingsScreen
+import com.shroudbyte.ui.theme.ShroudTheme
 import kotlinx.coroutines.launch
 
 /**
@@ -44,11 +46,11 @@ import kotlinx.coroutines.launch
  * default; the others are full-screen takeovers that snap back via the
  * top-left arrow.
  */
-enum class Route { Browser, Bookmarks, History, Settings, Addresses, Passwords, About }
+enum class Route { Browser, Bookmarks, History, Settings, Addresses, Passwords, About, Reader }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BrowserScreen(app: ShroudApplication) {
+fun BrowserScreen(app: ShroudApplication, theme: ShroudTheme = ShroudTheme.Dark) {
     val vm: BrowserViewModel = viewModel(factory = BrowserViewModel.Factory)
     var route by remember { mutableStateOf(Route.Browser) }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -92,6 +94,12 @@ fun BrowserScreen(app: ShroudApplication) {
                 DrawerItem("Find on page") {
                     vm.toggleFindBar()
                     scope.launch { drawerState.close() }
+                }
+                DrawerItem("Reader mode") {
+                    scope.launch { drawerState.close() }
+                    vm.openReader { ok ->
+                        if (ok) route = Route.Reader
+                    }
                 }
             }
         },
@@ -142,6 +150,23 @@ fun BrowserScreen(app: ShroudApplication) {
                 app = app,
                 onBack = { route = Route.Browser },
             )
+            Route.Reader -> {
+                val article = vm.readerArticle
+                if (article == null) {
+                    // Extraction failed or stale; bounce back.
+                    route = Route.Browser
+                } else {
+                    ReaderScreen(
+                        article = article,
+                        originalUrl = vm.currentTab?.url.orEmpty(),
+                        theme = theme,
+                        onBack = {
+                            vm.closeReader()
+                            route = Route.Browser
+                        },
+                    )
+                }
+            }
         }
     }
 }
@@ -210,6 +235,13 @@ private fun BrowserContent(
                     onClose = { vm.toggleFindBar() },
                 )
             }
+            if (vm.autofillSuggestions.isNotEmpty()) {
+                AutofillBanner(
+                    suggestions = vm.autofillSuggestions,
+                    onPick = { vm.applyAutofill(it) },
+                    onDismiss = { vm.dismissAutofill() },
+                )
+            }
             Box(modifier = Modifier.fillMaxSize()) {
             val tab = vm.currentTab
             if (tab != null) {
@@ -230,7 +262,9 @@ private fun BrowserContent(
                                     settings.databaseEnabled = true
                                     webViewClient = ShroudWebViewClient(
                                         tab, app.settings, app.history, app.hostBlocker,
-                                    )
+                                    ).apply {
+                                        onPageFinishedExtra = { vm.maybeShowAutofill() }
+                                    }
                                     webChromeClient = ShroudWebChromeClient(ctx, tab)
                                     setDownloadListener { url, userAgent, contentDisposition,
                                                            mimeType, _ ->
@@ -265,6 +299,43 @@ private fun BrowserContent(
                     }
                 }
             }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AutofillBanner(
+    suggestions: List<com.shroudbyte.passwords.PasswordEntry>,
+    onPick: (com.shroudbyte.passwords.PasswordEntry) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        tonalElevation = 4.dp,
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Fill credentials for this site",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "Dismiss")
+                }
+            }
+            for (s in suggestions) {
+                TextButton(
+                    onClick = { onPick(s) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = s.username +
+                            (if (s.name.isNotBlank() && s.name != s.username) "  •  ${s.name}" else ""),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
     }

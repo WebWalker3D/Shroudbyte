@@ -24,7 +24,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             ShroudbyteTheme(theme = theme) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    BrowserScreen(app)
+                    BrowserScreen(app, theme = theme)
                 }
             }
         }

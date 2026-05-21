@@ -60,7 +60,11 @@ class ShroudWebViewClient(
         tab.title = view.title ?: url
         tab.progress = 100
         history.record(url, tab.title)
+        onPageFinishedExtra?.invoke()
     }
+
+    /** Optional UI-thread hook for the page-finished event; set by the screen. */
+    var onPageFinishedExtra: (() -> Unit)? = null
 
     private fun maybeStripTracking(url: String): String =
         if (settings.load().stripTracking) TrackingParams.strip(url) else url
