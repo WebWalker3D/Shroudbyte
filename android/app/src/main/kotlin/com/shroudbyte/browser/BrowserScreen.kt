@@ -35,6 +35,7 @@ import com.shroudbyte.ui.screens.AddressesScreen
 import com.shroudbyte.ui.screens.BookmarksScreen
 import com.shroudbyte.ui.screens.HistoryScreen
 import com.shroudbyte.ui.screens.NewTabPanel
+import com.shroudbyte.ui.screens.PasswordsScreen
 import com.shroudbyte.ui.screens.SettingsScreen
 import kotlinx.coroutines.launch
 
@@ -43,7 +44,7 @@ import kotlinx.coroutines.launch
  * default; the others are full-screen takeovers that snap back via the
  * top-left arrow.
  */
-enum class Route { Browser, Bookmarks, History, Settings, Addresses, About }
+enum class Route { Browser, Bookmarks, History, Settings, Addresses, Passwords, About }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -73,6 +74,10 @@ fun BrowserScreen(app: ShroudApplication) {
                 }
                 DrawerItem("Addresses") {
                     route = Route.Addresses
+                    scope.launch { drawerState.close() }
+                }
+                DrawerItem("Passwords") {
+                    route = Route.Passwords
                     scope.launch { drawerState.close() }
                 }
                 DrawerItem("Settings") {
@@ -126,6 +131,10 @@ fun BrowserScreen(app: ShroudApplication) {
                 },
             )
             Route.Settings -> SettingsScreen(
+                app = app,
+                onBack = { route = Route.Browser },
+            )
+            Route.Passwords -> PasswordsScreen(
                 app = app,
                 onBack = { route = Route.Browser },
             )

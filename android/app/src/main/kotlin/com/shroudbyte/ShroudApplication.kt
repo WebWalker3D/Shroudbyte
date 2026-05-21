@@ -4,6 +4,7 @@ import android.app.Application
 import com.shroudbyte.addresses.AddressBook
 import com.shroudbyte.adblock.HostBlocker
 import com.shroudbyte.browser.SessionRepository
+import com.shroudbyte.passwords.PasswordVault
 import com.shroudbyte.storage.BookmarksRepository
 import com.shroudbyte.storage.HistoryRepository
 import com.shroudbyte.storage.SettingsRepository
@@ -29,6 +30,8 @@ class ShroudApplication : Application() {
         private set
     lateinit var session: SessionRepository
         private set
+    lateinit var vault: PasswordVault
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -42,5 +45,6 @@ class ShroudApplication : Application() {
         addresses = AddressBook(storage)
         hostBlocker = HostBlocker()
         session = SessionRepository(storage)
+        vault = PasswordVault(storage)
     }
 }
