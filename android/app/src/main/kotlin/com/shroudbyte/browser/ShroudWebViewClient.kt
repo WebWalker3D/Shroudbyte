@@ -15,7 +15,7 @@ import java.io.ByteArrayInputStream
  * `browser/adblock.py` on desktop:
  *
  *  - Drop subresource requests to known tracker hosts.
- *  - Rewrite outgoing main-frame URLs to strip utm_*/fbclid/etc.
+ *  - Rewrite outgoing main-frame URLs to strip utm_ params, fbclid, and friends.
  *  - Upgrade plain http:// to https:// when HTTPS-only mode is on.
  *  - Record the URL we end up on in the history store.
  */

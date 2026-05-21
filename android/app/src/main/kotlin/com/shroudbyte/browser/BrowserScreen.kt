@@ -11,7 +11,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -125,7 +127,7 @@ private fun BrowserTopBar(
                 keyboardActions = KeyboardActions(onGo = { onGo() }),
             )
             IconButton(onClick = onGo) {
-                Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Go")
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Go")
             }
         }
     }
