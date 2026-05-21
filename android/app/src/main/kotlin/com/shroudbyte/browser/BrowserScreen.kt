@@ -78,6 +78,11 @@ fun BrowserScreen(app: ShroudApplication) {
                     route = Route.Settings
                     scope.launch { drawerState.close() }
                 }
+                HorizontalDivider()
+                DrawerItem("Find on page") {
+                    vm.toggleFindBar()
+                    scope.launch { drawerState.close() }
+                }
             }
         },
     ) {
@@ -178,7 +183,16 @@ private fun BrowserContent(
             )
         },
     ) { padding ->
-        Box(modifier = Modifier.padding(padding).fillMaxSize()) {
+        Column(modifier = Modifier.padding(padding).fillMaxSize()) {
+            if (vm.findBarVisible) {
+                FindBar(
+                    onQueryChange = { vm.find(it) },
+                    onNext = { vm.findNext(true) },
+                    onPrev = { vm.findNext(false) },
+                    onClose = { vm.toggleFindBar() },
+                )
+            }
+            Box(modifier = Modifier.fillMaxSize()) {
             val tab = vm.currentTab
             if (tab != null) {
                 if (tab.url.isBlank() || tab.url == "about:blank") {
@@ -232,6 +246,46 @@ private fun BrowserContent(
                         )
                     }
                 }
+            }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FindBar(
+    onQueryChange: (String) -> Unit,
+    onNext: () -> Unit,
+    onPrev: () -> Unit,
+    onClose: () -> Unit,
+) {
+    var text by remember { mutableStateOf("") }
+    Surface(tonalElevation = 2.dp) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = text,
+                onValueChange = {
+                    text = it
+                    onQueryChange(it)
+                },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                placeholder = { Text("Find on page") },
+            )
+            IconButton(onClick = onPrev) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Previous")
+            }
+            IconButton(onClick = onNext) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next")
+            }
+            IconButton(onClick = onClose) {
+                Icon(Icons.Default.Close, contentDescription = "Close find bar")
             }
         }
     }

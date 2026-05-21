@@ -127,6 +127,27 @@ class BrowserViewModel(private val app: ShroudApplication) : AndroidViewModel(ap
         return app.bookmarks.isBookmarked(url)
     }
 
+    // ------------------------------------------------------------------
+    // Find-in-page
+    // ------------------------------------------------------------------
+
+    private val _findBarVisible = mutableStateOf(false)
+    val findBarVisible: Boolean get() = _findBarVisible.value
+
+    fun toggleFindBar() {
+        _findBarVisible.value = !_findBarVisible.value
+        if (!_findBarVisible.value) currentTab?.webView?.clearMatches()
+    }
+
+    fun find(query: String) {
+        val wv = currentTab?.webView ?: return
+        if (query.isEmpty()) wv.clearMatches() else wv.findAllAsync(query)
+    }
+
+    fun findNext(forward: Boolean) {
+        currentTab?.webView?.findNext(forward)
+    }
+
     companion object {
         val Factory = viewModelFactory {
             initializer {
