@@ -34,6 +34,7 @@ dependencies = [
 dev = [
     "pytest>=7.0.0",
     "pytest-qt>=4.2.0",
+    "ruff>=0.4.0",
 ]
 
 [project.scripts]
@@ -47,3 +48,33 @@ include = ["browser*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["build", "dist"]
+
+[tool.ruff.lint]
+# A conservative starter set — pyflakes + pycodestyle errors + bug-prone
+# patterns. Style nits beyond this are left to humans / future config.
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "B",   # flake8-bugbear (real bug patterns)
+    "I",   # isort (import ordering)
+    "UP",  # pyupgrade (modern syntax)
+    "W",   # pycodestyle warnings
+]
+ignore = [
+    "E501",   # line too long — UI strings and HTML run long on purpose
+    "E731",   # lambda assignments — used in a few Qt signal hookups
+    "B008",   # function call as default arg — clear in context
+    "UP038",  # isinstance tuple → union — incompatible with 3.11 type-check perf
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Scheme module is a giant template engine; F541 (no placeholders in f-string)
+# fires constantly on intentional f-string usage for the CSS/JS embedding.
+"browser/scheme.py" = ["F541", "E741"]
+# Tests are allowed to have unused locals (assert side effects) and assertions.
+"tests/*" = ["B011", "F401"]
