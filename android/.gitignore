@@ -1,0 +1,19 @@
+# Gradle
+.gradle/
+build/
+local.properties
+*.iml
+
+# Android Studio
+.idea/
+captures/
+
+# Generated
+app/build/
+app/release/
+
+# Native
+*.so
+
+# OS
+.DS_Store

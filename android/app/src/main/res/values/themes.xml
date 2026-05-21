@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base theme for the activity before Compose takes over.  Compose
+         drives the real Material3 styling at runtime in ui/theme/Theme.kt. -->
+    <style name="Theme.Shroudbyte" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#0c0b10</item>
+        <item name="android:navigationBarColor">#0c0b10</item>
+        <item name="android:windowBackground">#0c0b10</item>
+    </style>
+</resources>
