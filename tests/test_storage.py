@@ -137,6 +137,55 @@ class TestPermissions:
         assert storage.get_permission("example.com", "mic") is None
 
 
+class TestPermissionExpiry:
+    """The permission_ttl_days setting drives an expires_at field that
+    get_permission must honor — expired entries should return None and
+    be cleaned up from disk."""
+
+    def test_expired_permission_returns_none(self, tmp_data_dir, monkeypatch):
+        import time as _time
+        now = [1700000000.0]
+        monkeypatch.setattr(_time, "time", lambda: now[0])
+        # Also patch the time reference inside storage.
+        monkeypatch.setattr(storage.time, "time", lambda: now[0])
+
+        storage.set_permission("example.com", "camera", "allow", ttl_days=7)
+        assert storage.get_permission("example.com", "camera") == "allow"
+
+        # Fast-forward 8 days.
+        now[0] += 8 * 86400
+        assert storage.get_permission("example.com", "camera") is None
+
+    def test_expired_permission_is_removed_from_disk(self, tmp_data_dir, monkeypatch):
+        import time as _time
+        now = [1700000000.0]
+        monkeypatch.setattr(storage.time, "time", lambda: now[0])
+        storage.set_permission("example.com", "camera", "allow", ttl_days=1)
+        now[0] += 2 * 86400
+        # Triggering the read also cleans up.
+        storage.get_permission("example.com", "camera")
+        perms = storage.load_permissions()
+        assert "example.com" not in perms or "camera" not in perms.get("example.com", {})
+
+    def test_ttl_zero_means_never_expires(self, tmp_data_dir, monkeypatch):
+        import time as _time
+        now = [1700000000.0]
+        monkeypatch.setattr(storage.time, "time", lambda: now[0])
+        storage.set_permission("example.com", "camera", "allow", ttl_days=0)
+        # A century later — still here.
+        now[0] += 100 * 365 * 86400
+        assert storage.get_permission("example.com", "camera") == "allow"
+
+    def test_legacy_string_format_has_no_expiry(self, tmp_data_dir):
+        # Pre-TTL format stored permissions as bare strings, not dicts.
+        # The read path should still return them.
+        storage.save_permissions({
+            "example.com": {"camera": "allow", "mic": "deny"},
+        })
+        assert storage.get_permission("example.com", "camera") == "allow"
+        assert storage.get_permission("example.com", "mic") == "deny"
+
+
 # ---------------------------------------------------------------------------
 # Site exceptions
 # ---------------------------------------------------------------------------
