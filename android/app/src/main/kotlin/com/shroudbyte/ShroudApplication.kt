@@ -33,6 +33,9 @@ class ShroudApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         storage = Storage.forContext(this)
+        // Install the crash logger early so a startup crash in any of the
+        // repos below still produces a recoverable report on disk.
+        CrashLogger.install(storage)
         settings = SettingsRepository(storage)
         bookmarks = BookmarksRepository(storage)
         history = HistoryRepository(storage)

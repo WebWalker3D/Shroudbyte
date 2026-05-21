@@ -1,5 +1,8 @@
 package com.shroudbyte.ui.screens
 
+import android.webkit.CookieManager
+import android.webkit.WebStorage
+import android.webkit.WebView
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -9,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.shroudbyte.ShroudApplication
 
@@ -17,6 +21,8 @@ import com.shroudbyte.ShroudApplication
 fun SettingsScreen(app: ShroudApplication, onBack: () -> Unit) {
     val current by remember { mutableStateOf(app.settings.load()) }
     var s by remember { mutableStateOf(current) }
+    val ctx = LocalContext.current
+    var clearConfirm by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         topBar = {
@@ -78,8 +84,48 @@ fun SettingsScreen(app: ShroudApplication, onBack: () -> Unit) {
                 onSelect = { s = s.copy(searchEngine = it).also(app.settings::save) },
             )
 
+            HorizontalDivider()
+
+            Text("Clear data", style = MaterialTheme.typography.titleMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { clearConfirm = "history" }) {
+                    Text("History")
+                }
+                OutlinedButton(onClick = { clearConfirm = "cookies" }) {
+                    Text("Cookies")
+                }
+                OutlinedButton(onClick = { clearConfirm = "cache" }) {
+                    Text("Cache")
+                }
+            }
+
             Spacer(Modifier.height(32.dp))
         }
+    }
+
+    clearConfirm?.let { kind ->
+        AlertDialog(
+            onDismissRequest = { clearConfirm = null },
+            title = { Text("Clear ${kind.replaceFirstChar { it.uppercase() }}?") },
+            text = { Text("This cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    when (kind) {
+                        "history" -> app.history.clear()
+                        "cookies" -> CookieManager.getInstance().removeAllCookies(null)
+                        "cache" -> {
+                            // Per-WebView clearCache + storage flush.
+                            WebView(ctx).clearCache(true)
+                            WebStorage.getInstance().deleteAllData()
+                        }
+                    }
+                    clearConfirm = null
+                }) { Text("Clear") }
+            },
+            dismissButton = {
+                TextButton(onClick = { clearConfirm = null }) { Text("Cancel") }
+            },
+        )
     }
 }
 

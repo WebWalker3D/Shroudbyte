@@ -30,6 +30,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shroudbyte.ShroudApplication
+import com.shroudbyte.ui.screens.AboutScreen
 import com.shroudbyte.ui.screens.AddressesScreen
 import com.shroudbyte.ui.screens.BookmarksScreen
 import com.shroudbyte.ui.screens.HistoryScreen
@@ -42,7 +43,7 @@ import kotlinx.coroutines.launch
  * default; the others are full-screen takeovers that snap back via the
  * top-left arrow.
  */
-enum class Route { Browser, Bookmarks, History, Settings, Addresses }
+enum class Route { Browser, Bookmarks, History, Settings, Addresses, About }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -76,6 +77,10 @@ fun BrowserScreen(app: ShroudApplication) {
                 }
                 DrawerItem("Settings") {
                     route = Route.Settings
+                    scope.launch { drawerState.close() }
+                }
+                DrawerItem("About") {
+                    route = Route.About
                     scope.launch { drawerState.close() }
                 }
                 HorizontalDivider()
@@ -121,6 +126,10 @@ fun BrowserScreen(app: ShroudApplication) {
                 },
             )
             Route.Settings -> SettingsScreen(
+                app = app,
+                onBack = { route = Route.Browser },
+            )
+            Route.About -> AboutScreen(
                 app = app,
                 onBack = { route = Route.Browser },
             )
