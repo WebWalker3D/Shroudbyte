@@ -3,6 +3,7 @@ package com.shroudbyte.browser
 import android.view.ViewGroup
 import android.webkit.WebChromeClient
 import android.webkit.WebView
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -48,6 +49,11 @@ fun BrowserScreen(app: ShroudApplication) {
     var route by remember { mutableStateOf(Route.Browser) }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+
+    // System back on a secondary screen returns to the browser.
+    BackHandler(enabled = route != Route.Browser) {
+        route = Route.Browser
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -123,6 +129,13 @@ private fun BrowserContent(
 ) {
     var urlBarText by remember(vm.currentTab?.id, vm.currentTab?.url) {
         mutableStateOf(vm.currentTab?.url.orEmpty())
+    }
+
+    // System back goes to the previous page in the current tab when
+    // available; only falls through to default activity-finish behaviour
+    // (closing the app) when there's nowhere to go back to.
+    BackHandler(enabled = vm.currentTab?.canGoBack == true) {
+        vm.back()
     }
     Scaffold(
         topBar = {
